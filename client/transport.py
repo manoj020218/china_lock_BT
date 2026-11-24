@@ -45,12 +45,14 @@ class BleTransport:
         timeout: float = 5.0,
         char_uuid: str = CHAR_FFE1,
         on_notification: Optional[Callable[[Frame], None]] = None,
+        frame_logger=None,
     ) -> None:
         self.address = address
         self.payload_size = payload_size
         self.timeout = timeout
         self.char_uuid = char_uuid
         self.on_notification = on_notification
+        self.frame_logger = frame_logger
 
         self._client = None  # bleak.BleakClient, created in connect()
         self._decoder = FrameStreamDecoder()
@@ -90,6 +92,8 @@ class BleTransport:
     def _handle_notify(self, _sender, data: bytearray) -> None:
         frames = self._decoder.feed(bytes(data), request_command=self._pending_command)
         for frame in frames:
+            if self.frame_logger is not None:
+                self.frame_logger.rx(frame)
             # Unsolicited incoming command (e.g. 0x89 registration/remote event).
             if frame.flag == FLAG_COMMAND and frame.command == int(Cmd.ASYNC_NOTIFICATION):
                 if self.on_notification is not None:
@@ -117,6 +121,8 @@ class BleTransport:
         async with self._lock:
             self._pending_command = command_id
             self._response = loop.create_future()
+            if self.frame_logger is not None:
+                self.frame_logger.tx(command_id, payload)
             frame = encode_command(command_id, payload, address)
             try:
                 for i in range(0, len(frame), self.payload_size):

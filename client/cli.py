@@ -35,8 +35,20 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="permit state-changing operations (unlock, writes, reboot, reset)",
     )
+    p.add_argument(
+        "--verbose", action="store_true", help="log redacted TX/RX frames to stderr"
+    )
+    p.add_argument(
+        "--show-payloads",
+        action="store_true",
+        help="UNSAFE: log raw payloads (may contain credentials); never share such logs",
+    )
+    p.add_argument("--scan-timeout", type=float, default=8.0)
 
     sub = p.add_subparsers(dest="command", required=True)
+
+    sc = sub.add_parser("scan", help="scan for nearby locks by advertised name")
+    sc.add_argument("--rssi", type=int, default=-90, help="minimum RSSI to include")
 
     sub.add_parser("info", help="read firmware version and capabilities")
     sub.add_parser("battery", help="read battery percentage and voltage")
@@ -94,11 +106,29 @@ async def _run(args: argparse.Namespace) -> int:
         config_path=args.config,
     )
 
+    logger = None
+    if args.verbose or args.show_payloads:
+        from .logging_util import FrameLogger
+        logger = FrameLogger(show_payloads=args.show_payloads)
+
+    if args.command == "scan":
+        from .discover import scan_for_locks
+        matches = await scan_for_locks(
+            timeout=args.scan_timeout, rssi_threshold=args.rssi,
+            lock_id=config.lock_id or None,
+        )
+        print(f"found {len(matches)} lock(s):")
+        for m in matches:
+            print(f"  {m.address}  {m.name}  rssi={m.rssi}")
+        return 0
+
     async with HahaLock(
         config,
         allow_write=args.allow_write,
         payload_size=args.payload_size,
         timeout=args.timeout,
+        scan_timeout=args.scan_timeout,
+        frame_logger=logger,
     ) as lock:
         version = await lock.login()
 

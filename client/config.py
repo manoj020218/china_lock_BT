@@ -39,6 +39,17 @@ class LockConfig:
                 + " (set via --lock-id/--address/--password, env vars, or a config file)"
             )
 
+    def require_connectable(self) -> None:
+        """Require a password and some way to reach the lock (address or id)."""
+
+        if not self.password:
+            raise ValueError("missing connection password (--password / env / config)")
+        if not self.address and not self.lock_id:
+            raise ValueError(
+                "need an --address or a --lock-id to find the lock "
+                "(a lock-id triggers a BLE scan by advertised name)"
+            )
+
 
 def _load_file(path: Optional[str]) -> dict:
     candidate = path or os.environ.get("JENIX_CONFIG") or DEFAULT_CONFIG_FILENAME

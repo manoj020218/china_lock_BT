@@ -39,17 +39,19 @@ class HahaLock:
         allow_write: bool = False,
         payload_size: int = 20,
         timeout: float = 5.0,
+        scan_timeout: float = 8.0,
         on_remote_event: Optional[Callable[[Frame], None]] = None,
+        frame_logger=None,
     ) -> None:
-        config.require_live()
+        config.require_connectable()
         self.config = config
         self.allow_write = allow_write
-        self._transport = BleTransport(
-            config.address,
-            payload_size=payload_size,
-            timeout=timeout,
-            on_notification=on_remote_event,
-        )
+        self.scan_timeout = scan_timeout
+        self._on_remote_event = on_remote_event
+        self._frame_logger = frame_logger
+        self._payload_size = payload_size
+        self._timeout = timeout
+        self._transport: Optional[BleTransport] = None
         self._session_address = INITIAL_ADDRESS
         self._authenticated = False
 
@@ -63,10 +65,30 @@ class HahaLock:
         await self.disconnect()
 
     async def connect(self) -> None:
+        address = self.config.address
+        if not address:
+            from .discover import resolve_address
+            if self._frame_logger is not None:
+                self._frame_logger.event(f"scanning for lock id {self.config.lock_id}...")
+            address = await resolve_address(self.config.lock_id, timeout=self.scan_timeout)
+            if not address:
+                raise RuntimeError(
+                    f"no lock advertising id {self.config.lock_id} was found in range"
+                )
+            if self._frame_logger is not None:
+                self._frame_logger.event(f"found lock at {address}")
+        self._transport = BleTransport(
+            address,
+            payload_size=self._payload_size,
+            timeout=self._timeout,
+            on_notification=self._on_remote_event,
+            frame_logger=self._frame_logger,
+        )
         await self._transport.connect()
 
     async def disconnect(self) -> None:
-        await self._transport.disconnect()
+        if self._transport is not None:
+            await self._transport.disconnect()
         self._authenticated = False
         self._session_address = INITIAL_ADDRESS
 

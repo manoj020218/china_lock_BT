@@ -54,7 +54,11 @@ or copy `client/jenix.config.example.json` to `jenix.config.json`
 ```bash
 pip install -r client/requirements.txt
 
-# read-only (safe) commands
+# discover nearby locks by advertised name (no login needed)
+python -m client.cli scan
+python -m client.cli --lock-id 8F3EE684ECE3 scan   # filter to one lock id
+
+# read-only (safe) commands  (--address optional: a --lock-id triggers a scan)
 python -m client.cli info
 python -m client.cli battery
 python -m client.cli time
@@ -71,6 +75,19 @@ python -m client.cli --allow-write set-auto-lock --seconds 5
 
 Without `--allow-write`, any unlock/write/reboot/reset is refused before it
 touches the lock.
+
+Add `--verbose` to any command to log redacted TX/RX frames to stderr
+(command name + payload length + SHA-256; raw bytes are never printed). Only
+`--show-payloads` prints raw payloads, which can contain credentials — never
+share such logs.
+
+### Transport note (BLE adapter)
+
+`bleak` drives the host machine's own Bluetooth radio. A PC without a BLE
+adapter cannot use an Android phone's Bluetooth over adb. Options: a cheap USB
+BLE dongle, a Linux SBC (e.g. Raspberry Pi) as the test host, or — once the
+ESP32-C3 exists — a thin BLE-to-serial bridge on the ESP32 driven from the PC
+(which also advances Phase 4). The scan/connect code here is adapter-agnostic.
 
 ## Tests
 

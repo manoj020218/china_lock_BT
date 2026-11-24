@@ -172,10 +172,10 @@ Exit criteria: captured request and response packets agree with the protocol spe
 - [x] Implement administrator authentication (legacy command-version 0; session address adopted from the login ack).
 - [x] Encode all validated commands with a 30-test offline suite (`tests/test_client_protocol.py`): action bytes, user/schedule/record layouts, normally-open packed field, record mode mapping, auth payload.
 - [x] Gate unlock/write/destructive operations behind `allow_write` (`--allow-write`).
-- [ ] Implement BLE discovery (currently connects by configured address; add scan-by-name/service with RSSI + lock-id allowlist).
-- [ ] Run read-only commands against the physical lock from a PC with a BLE adapter.
+- [x] Implement BLE discovery: scan-by-name with RSSI threshold and a lock-id allowlist (`client/discover.py`, `scan` CLI command; sessions auto-resolve an address from a lock id).
+- [x] Add structured packet logging with credential redaction (`client/logging_util.py`; `--verbose` logs redacted TX/RX frames, `--show-payloads` gates raw bytes).
+- [ ] Run read-only commands against the physical lock from a BLE-capable host (PC dongle, SBC, or an ESP32 BLE-to-serial bridge — the PC alone has no BLE adapter).
 - [ ] Run unlock and one reversible user-management operation live.
-- [ ] Add structured packet logging with credential redaction.
 - [ ] Build the no-RTC clock automation (set-time on bind, battery-jump -> set-time) in the app/bridge layer above the library.
 - [ ] Implement the newer DES timestamp-challenge login path for non-v0 firmware.
 
@@ -323,6 +323,7 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Captured firmware-upgrade check (cloud version query, returned "No updates"; image is vendor-cloud sourced, not app-local), **device reboot** (`0x81`, empty payload, ack 0), and **restore factory settings** (`0x0E` payload `00 00`, ack 0; lock spoke "initialization successful"). The factory reset unbinds and wipes the lock, which also cleaned up the test users `TEST1`/`ADMIN2`, the paired remote and all test settings. The lock now needs re-provisioning to be used again.
 - Opened Phase 3: scaffolded the `client/` desktop package (pure protocol builders/parsers, legacy auth, runtime config, bleak BLE transport, demand-driven session with gated writes, and a CLI). Added 30 offline unit tests that pin the builders/parsers to the captured values; all pass without BLE. Live-against-lock testing, BLE scan-by-name, redacted packet logging and the DES login path remain to do.
 - Recorded a critical hardware constraint: the lock has **no RTC**, so its clock resets on battery death/replacement. The Jenix app and ESP32 bridge must set time on bind and auto re-set it after a battery-level recovery; noted in operating constraints and the client README.
+- Added BLE **scan-by-name** discovery (name-prefix + RSSI + lock-id allowlist, with the FFE0 service as corroboration) and **redacted frame logging** (command + length + SHA-256 by default; raw payloads gated behind `--show-payloads`), plus 11 more offline tests (41 total). Noted that the PC has no BLE adapter and an Android phone cannot stand in over adb; live testing needs a USB BLE dongle, an SBC, or the forthcoming ESP32 as a BLE-to-serial bridge.
 
 ## Progress update rules
 
