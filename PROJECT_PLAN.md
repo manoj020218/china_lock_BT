@@ -149,8 +149,8 @@ Exit criteria: a protocol specification can encode and decode captured packets w
 ### Phase 2 Controlled BLE capture — In progress
 
 - [x] Enable Android Bluetooth HCI snoop logging.
-- [ ] Capture automatic discovery and lock-ID selection.
-- [ ] Capture initial administrator setup on a test or safely resettable lock without publishing credentials.
+- [x] Capture automatic discovery and lock-ID selection.
+- [x] Capture connection-password setup after a fresh app install without publishing credentials.
 - [x] Record clean connect and administrator-login sessions.
 - [x] Capture one operation at a time: version, battery, time and unlock.
 - [ ] Capture user, PIN, RFID and fingerprint workflows using test identities.
@@ -295,6 +295,9 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Confirmed target firmware `BK50D-V2.5`, legacy command version zero, live `FFE0`/`FFE1`/`FFE2` handles, flag-7 acknowledgements and checksum behavior.
 - Confirmed that the app uses demand-driven BLE sessions and receives a new protocol session address after reconnect.
 - Added a redacting BTSnoop analyzer and expanded the synthetic regression suite to ten passing tests.
+- Captured the fresh-install Add Device flow, including the `Lck1_` advertisement, empty-login probe, UID/time setup and `0x12` login-key provisioning.
+- Confirmed that this firmware advertises name and service fields without manufacturer-specific data.
+- Captured and physically confirmed a successful unlock after the app created its default 60-byte general user.
 
 ## Progress update rules
 

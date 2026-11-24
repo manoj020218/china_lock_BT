@@ -23,6 +23,17 @@ All observed HAHA requests were ATT Write Requests to `0x000D`. Responses were H
 
 No ATT MTU exchange was present in the captured discovery sequence, although a user response larger than the default 20-byte value payload was transported successfully. ESP32 testing must therefore discover the effective MTU and support L2CAP/notification reassembly rather than assume the app's preferred value.
 
+## Validated advertisement
+
+A fresh application install captured the target advertisement before any saved lock data existed:
+
+- advertised name prefix `Lck1_`, followed by the lock ID;
+- RSSI ranged from approximately `-58` to `-42 dBm` while the phone was nearby;
+- observed AD field types were flags `0x01`, complete 16-bit service UUIDs `0x03`, shortened name `0x08` and complete name `0x09`;
+- no manufacturer-specific AD field `0xFF` was present for this firmware.
+
+This is a live difference from the app's optional manufacturer-data parser. The ESP32 must accept a recognized name plus service UUID when manufacturer data is absent, while still applying an RSSI threshold and explicit lock-ID allowlist.
+
 ## Validated binary protocol
 
 A successful capture produced 360 checksum-valid HAHA frames. It confirmed:
@@ -55,6 +66,18 @@ Command `0x80` returned firmware string `BK50D-V2.5`. Its trailing protocol flag
 
 The captured `0x13` request contained a ten-character decimal key. It matched the Phase 1 legacy derivation path. The actual key and all source credentials are intentionally omitted. Login succeeded and the response repeated the login string with a terminator while assigning the session address.
 
+## Fresh-install onboarding
+
+Uninstalling and reinstalling the mobile app cleared its local lock record but did not reset the physical lock. The fresh Add Device workflow was captured as follows:
+
+1. Search discovered the `Lck1_...` advertisement and displayed the lock ID.
+2. Confirming the lock sent an empty `0x13` login probe followed by `0x8B` get time, then displayed **Set connection password**.
+3. Submitting the existing connection password sent `0x80` twice, then `0x82` get lock UID, `0x8A` set time and `0x12` set login key.
+4. Every response returned error code zero, and the app saved the device locally.
+5. The app returned to the lock dashboard in its normal disconnected state.
+
+The `0x12` payload was the legacy decimal key plus a NUL terminator. Neither that key nor the entered password is included in public artifacts.
+
 ## Validated operations
 
 | Command | Result | Sanitized finding |
@@ -73,9 +96,12 @@ The Set Time dialog polls `0x8B` about twice per second while open. This created
 
 The `0xA3` response confirmed the 60-byte record size and field placement. The live user data is not retained in public test vectors.
 
+After the fresh install, the first physical unlock performed this additional sequence before `0x88`: `0xA3` returned zero users, `0xA4` created a default 60-byte general user, and `0xA3` read it back. The subsequent `0x88` acknowledgement returned error zero and the physical lock was confirmed to unlock. This explains why an app-generated unlock PIN/user record existed in the earlier capture.
+
+Automated and manual press-and-hold Lock attempts produced the app's generic error. The isolated traces contained only scanning activity: no target GATT connection, ATT value or HAHA frame was present. The failure therefore occurred before login or command dispatch, not as a protocol error response. Other dashboard commands failed in the same state. A successful lock-action capture remains pending.
+
 ## Pending live validation
 
-- capture the lock's actual advertisement while it is awake;
 - capture `0xB2` record count and `0xB3` record batches;
 - safely create, read back and delete a test general user and PIN;
 - capture RFID and fingerprint enrollment with a person presenting test credentials at the lock;

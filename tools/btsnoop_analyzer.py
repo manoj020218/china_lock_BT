@@ -114,6 +114,7 @@ class Advertisement:
     rssi: int
     name: Optional[str]
     manufacturer_data: tuple[bytes, ...]
+    ad_types: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -167,9 +168,12 @@ def _signed_byte(value: int) -> int:
     return value - 256 if value >= 128 else value
 
 
-def _advertising_fields(data: bytes) -> tuple[Optional[str], tuple[bytes, ...]]:
+def _advertising_fields(
+    data: bytes,
+) -> tuple[Optional[str], tuple[bytes, ...], tuple[int, ...]]:
     name: Optional[str] = None
     manufacturer: list[bytes] = []
+    ad_types: list[int] = []
     offset = 0
     while offset < len(data):
         size = data[offset]
@@ -180,12 +184,13 @@ def _advertising_fields(data: bytes) -> tuple[Optional[str], tuple[bytes, ...]]:
             break
         field_type = data[offset + 1]
         field_value = data[offset + 2 : end]
+        ad_types.append(field_type)
         if field_type in (0x08, 0x09):
             name = field_value.decode("utf-8", errors="replace")
         elif field_type == 0xFF:
             manufacturer.append(field_value)
         offset = end
-    return name, tuple(manufacturer)
+    return name, tuple(manufacturer), tuple(ad_types)
 
 
 def iter_advertisements(records: Iterable[SnoopRecord]) -> Iterator[Advertisement]:
@@ -210,13 +215,14 @@ def iter_advertisements(records: Iterable[SnoopRecord]) -> Iterator[Advertisemen
                 data_end = data_start + data_len
                 if data_end >= len(params):
                     break
-                name, manufacturer = _advertising_fields(params[data_start:data_end])
+                name, manufacturer, ad_types = _advertising_fields(params[data_start:data_end])
                 yield Advertisement(
                     timestamp=record.timestamp,
                     address=address,
                     rssi=_signed_byte(params[data_end]),
                     name=name,
                     manufacturer_data=manufacturer,
+                    ad_types=ad_types,
                 )
                 offset = data_end + 1
         elif subevent == LE_EXTENDED_ADVERTISING_REPORT:
@@ -230,13 +236,14 @@ def iter_advertisements(records: Iterable[SnoopRecord]) -> Iterator[Advertisemen
                 data_end = data_start + data_len
                 if data_end > len(params):
                     break
-                name, manufacturer = _advertising_fields(params[data_start:data_end])
+                name, manufacturer, ad_types = _advertising_fields(params[data_start:data_end])
                 yield Advertisement(
                     timestamp=record.timestamp,
                     address=address,
                     rssi=rssi,
                     name=name,
                     manufacturer_data=manufacturer,
+                    ad_types=ad_types,
                 )
                 offset = data_end
 
@@ -361,22 +368,29 @@ def analyze(path: Path, *, show_payloads: bool = False) -> str:
         f"records={len(records)} advertisements={len(advertisements)} "
         f"att_values={len(att_values)} haha_frames={len(frames)}"
     ]
-    matching_ads = [
-        adv
+    recognized_prefixes = {"Lck1", "Lck2", "Lock", "Acc", "Acc1", "Acc2"}
+    names_by_address = {
+        adv.address: adv.name
         for adv in advertisements
-        if adv.name and adv.name.split("_", 1)[0] in {"Lck1", "Lck2", "Lock", "Acc", "Acc1", "Acc2"}
-    ]
-    seen_ads: set[tuple[str, int]] = set()
-    for adv in matching_ads:
-        label = _redacted_name(adv.name)
-        key = (label, adv.rssi)
-        if key in seen_ads:
-            continue
-        seen_ads.add(key)
+        if adv.name and adv.name.split("_", 1)[0] in recognized_prefixes
+    }
+    for address, name in names_by_address.items():
+        related = [adv for adv in advertisements if adv.address == address]
+        manufacturer_items = {
+            item for adv in related for item in adv.manufacturer_data
+        }
         manufacturer = ",".join(
-            f"len={len(item)} sha256={_digest(item)}" for item in adv.manufacturer_data
+            f"len={len(item)} sha256={_digest(item)}"
+            for item in sorted(manufacturer_items)
         ) or "none"
-        lines.append(f"advertisement name={label} rssi={adv.rssi} manufacturer={manufacturer}")
+        ad_types = sorted({field_type for adv in related for field_type in adv.ad_types})
+        rssi_values = [adv.rssi for adv in related]
+        lines.append(
+            f"advertisement name={_redacted_name(name)} reports={len(related)} "
+            f"rssi={min(rssi_values)}..{max(rssi_values)} "
+            f"ad_types={','.join(f'0x{value:02X}' for value in ad_types) or 'none'} "
+            f"manufacturer={manufacturer}"
+        )
 
     for item in frames:
         frame = item.frame

@@ -8,6 +8,7 @@ from tools.btsnoop_analyzer import (
     BTSNOOP_UNIX_EPOCH_DELTA_US,
     AttValue,
     SnoopRecord,
+    iter_advertisements,
     iter_att_values,
     iter_haha_frames,
     read_btsnoop,
@@ -49,6 +50,31 @@ def acl_att_record(*, sent: bool, opcode: int, value: bytes) -> SnoopRecord:
 
 
 class BtsnoopAnalyzerTests(unittest.TestCase):
+    def test_legacy_advertisement_fields(self) -> None:
+        name = b"Lck1_DEMO"
+        advertising_data = (
+            b"\x02\x01\x06"
+            + bytes((len(name) + 1, 0x09))
+            + name
+            + b"\x05\xFF\x06\xA1\x00\x01"
+        )
+        params = (
+            b"\x02\x01\x00\x00"
+            + b"\x01\x02\x03\x04\x05\x06"
+            + bytes((len(advertising_data),))
+            + advertising_data
+            + b"\xD8"
+        )
+        packet = b"\x04\x3E" + bytes((len(params),)) + params
+        record = SnoopRecord(timestamp=CAPTURE_TIME, sent=False, data=packet)
+
+        advertisements = list(iter_advertisements((record,)))
+        self.assertEqual(len(advertisements), 1)
+        self.assertEqual(advertisements[0].name, "Lck1_DEMO")
+        self.assertEqual(advertisements[0].rssi, -40)
+        self.assertEqual(advertisements[0].ad_types, (0x01, 0x09, 0xFF))
+        self.assertEqual(advertisements[0].manufacturer_data, (b"\x06\xA1\x00\x01",))
+
     def test_read_btsnoop_record(self) -> None:
         packet = b"\x04\x0E\x01\x00"
         unix_us = int(CAPTURE_TIME.timestamp() * 1_000_000)
