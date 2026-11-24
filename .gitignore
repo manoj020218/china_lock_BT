@@ -1,0 +1,28 @@
+# Vendor binaries and extracted application code
+artifacts/
+*.apk
+*.apks
+*.xapk
+
+# Bluetooth captures can contain identifiers or credentials
+captures/
+*.pcap
+*.pcapng
+*.btsnoop
+*btsnoop_hci.log
+
+# Secrets and local configuration
+.env
+.env.*
+secrets.*
+credentials.*
+
+# ESP32 and editor build output
+.pio/
+build/
+.vscode/
+.idea/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
