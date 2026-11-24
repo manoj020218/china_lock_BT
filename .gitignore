@@ -23,6 +23,12 @@ build/
 .vscode/
 .idea/
 
+# Python analysis output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
 # Operating-system files
 .DS_Store
 Thumbs.db

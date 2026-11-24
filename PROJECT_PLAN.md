@@ -1,8 +1,8 @@
 # HAHA Lock ESP32 LAN Bridge Project
 
 Last updated: 2026-11-24  
-Current phase: Protocol reverse engineering  
-Overall state: In progress
+Current phase: Phase 1 complete; awaiting authorization for Phase 2
+Overall state: Paused at the Phase 2 approval gate
 
 ## Project objective
 
@@ -67,7 +67,7 @@ The following items were found through static application analysis and still req
 - App logic and UI exist for users, administrator/general roles, PINs, RFID cards, fingerprints, time, temporary/offline passwords, battery information, records and attendance reporting.
 - Parsed unlock records contain a user ID, date/time bytes, unlock mode and direction.
 
-Preliminary command identifiers found in static code:
+Command identifiers mapped from the static application code:
 
 | Command | ID | Validation state |
 | --- | ---: | --- |
@@ -77,7 +77,7 @@ Preliminary command identifiers found in static code:
 | Unlock | `0x88` | Static evidence only |
 | Read battery | `0x8C` | Static evidence only |
 | System lock control | `0x8D` | Static evidence only |
-| User operation range | `0xA0` onward | Requires full mapping |
+| User operation range | `0xA0` onward | Statically mapped; live validation pending |
 | Read record count | `0xB2` | Static evidence only |
 | Read records | `0xB3` | Static evidence only |
 
@@ -93,12 +93,12 @@ Preliminary command identifiers found in static code:
 | Set lock time | App workflow found | Not validated |
 | Battery percentage/voltage | Command and response parser found | Not validated |
 | Low-battery alarm | Battery telemetry exists | Threshold/event unknown |
-| Admin/general users | Role UI and user model found | In progress |
-| PIN management | UI and protocol model found | In progress |
-| RFID management | UI and protocol model found | In progress |
-| Fingerprint management | UI and protocol model found | In progress |
-| Temporary/offline password | Both app flows found | Algorithm not yet mapped |
-| Unlock history | Count and record parsers found | In progress |
+| Admin/general users | Role values and 60-byte user structure mapped | Static mapping complete; live validation pending |
+| PIN management | Enrollment and storage format mapped | Static mapping complete; live validation pending |
+| RFID management | Enrollment and storage format mapped | Static mapping complete; live validation pending |
+| Fingerprint management | Enrollment and fingerprint commands mapped | Static mapping complete; live validation pending |
+| Temporary/offline password | Legacy local algorithm mapped; newer mode is vendor-server generated | Partially feasible offline; live validation pending |
+| Unlock history | Query, pagination and 12-byte record layout mapped | Static mapping complete; live validation pending |
 | Attendance export | Attendance-report capability flag found | Not validated |
 | Emergency unlock | Normal BLE unlock found | Firmware behavior unknown |
 
@@ -134,15 +134,15 @@ Status values are `Not started`, `In progress`, `Blocked` and `Complete`. A phas
 
 Exit criteria: project scope, evidence locations and next steps are documented.
 
-### Phase 1 Static protocol analysis — In progress
+### Phase 1 Static protocol analysis — Complete
 
 - [x] Identify BLE service and characteristic IDs.
 - [x] Locate connection, write, notification and acknowledgement logic.
 - [x] Locate version, login, unlock, battery and record commands.
-- [ ] Document complete packet framing, length, flags, address fields and checksum.
-- [ ] Map every command builder and response parser.
-- [ ] Document protocol-version and firmware-version differences.
-- [ ] Extract the temporary/offline password algorithm.
+- [x] Document complete packet framing, length, flags, address fields and checksum.
+- [x] Map every command builder and response parser found in the active protocol module.
+- [x] Document protocol-version and firmware-capability differences.
+- [x] Determine temporary/offline password paths: map the legacy local algorithm and identify the newer server-side generator.
 
 Exit criteria: a protocol specification can encode and decode captured packets without relying on the app.
 
@@ -229,11 +229,15 @@ Exit criteria: the client can provision, operate, recover and update the bridge 
 
 ## Immediate next actions
 
-1. Reverse engineer the packet framing and checksum functions in the extracted app logic.
-2. Produce a complete command/response table with field formats.
-3. Enable HCI snoop logging on the development phone.
-4. Capture a read-only session against the physical lock: connect, login, version and battery.
-5. Build a decoder to compare captured packets with the static protocol model.
+Phase 1 is complete. No Phase 2 lock interaction will begin until the user explicitly authorizes it.
+
+After authorization:
+
+1. Enable Android Bluetooth HCI snoop logging and confirm where the phone writes the capture.
+2. Capture discovery and a read-only connection session against the physical lock.
+3. Decode version, login, time and battery exchanges using the Phase 1 codec.
+4. Redact lock identifiers and credentials before retaining any sanitized test vector.
+5. Update the protocol specification with confirmed fields and firmware-specific differences.
 
 ## Acceptance criteria
 
@@ -247,6 +251,14 @@ Exit criteria: the client can provision, operate, recover and update the bridge 
 - Unsupported firmware or capabilities are reported clearly instead of sending unverified commands.
 
 ## Project artifacts
+
+Public, original project artifacts:
+
+- `docs/ble_protocol.md` — sanitized static protocol specification and Phase 2 validation list.
+- `tools/protocol_codec.py` — offline frame encoder, validated decoder, stream reassembler and credential-key derivation helpers.
+- `tests/test_protocol_codec.py` — synthetic protocol vectors and regression tests.
+
+Local-only evidence:
 
 - `artifacts/haha-base.apk` — HAHA Lock base APK extracted from the development phone.
 - `artifacts/haha-arm64.apk` — HAHA Lock ARM64 split APK.
@@ -271,6 +283,10 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Prepared the public Git repository policy so progress and original project code can be published without uploading vendor APKs, extracted code, captures or credentials.
 - Initialized and published the project baseline to `manoj020218/china_lock_BT` on the `main` branch.
 - Recorded the observed onboarding flow: automatic lock discovery, selection by lock ID, administrator-password setup and access to the full management UI.
+- Completed the sanitized static protocol specification, including GATT transport, framing, checksum, authentication, commands, users, records and offline-password paths.
+- Added an offline protocol codec and seven synthetic regression tests; no Bluetooth communication or lock state change is performed by this code.
+- Confirmed that the newer offline-password generator is vendor-server-side and cannot be recovered from the APK alone.
+- Closed Phase 1 and stopped at the authorization gate before controlled BLE capture.
 
 ## Progress update rules
 
