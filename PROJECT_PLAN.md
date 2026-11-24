@@ -1,7 +1,7 @@
 # HAHA Lock ESP32 LAN Bridge Project
 
 Last updated: 2026-11-24  
-Current phase: Phase 2 controlled BLE capture
+Current phase: Phase 3 desktop protocol test client (Phase 2 capture complete)
 Overall state: In progress
 
 ## Project objective
@@ -40,6 +40,7 @@ The work will reverse engineer only the protocol needed for the client's owned o
 ## Important operating constraints
 
 - Fingerprint and RFID enrollment normally requires a person to present the finger or card at the lock after enrollment starts.
+- **The lock has no battery-backed real-time clock.** Its time resets whenever the battery dies or is replaced, which silently breaks temporary passwords, per-user valid-time windows and record timestamps. Both the Jenix app and the ESP32 bridge must therefore (a) always set time (`0x8A`) immediately on bind and on first connect, and (b) auto re-set time after a battery replacement — detected by watching the battery level for a sudden recovery to ~80-90%+ — so the user never sees a time mismatch. Timezone must be configured explicitly.
 - The mobile app and bridge may not be able to hold BLE connections simultaneously. This must be tested.
 - Emergency unlock cannot be guaranteed when the lock battery is exhausted or its BLE subsystem is unavailable.
 - Different lock firmware versions may change commands, packet fields or authentication.
@@ -164,14 +165,19 @@ Exit criteria: a protocol specification can encode and decode captured packets w
 
 Exit criteria: captured request and response packets agree with the protocol specification for the target lock.
 
-### Phase 3 Desktop protocol test client — Not started
+### Phase 3 Desktop protocol test client — In progress
 
-- [ ] Implement BLE discovery and connection.
-- [ ] Implement framing, checksum, acknowledgements and timeouts.
-- [ ] Implement administrator authentication.
-- [ ] Test read-only commands first.
-- [ ] Test unlock and one reversible user-management operation.
+- [x] Scaffold the client package (`client/`): protocol builders/parsers, auth, config, BLE transport, demand-driven session, CLI.
+- [x] Implement framing, checksum, acknowledgements and timeouts (transport over `tools/protocol_codec.py`, serialized request/response).
+- [x] Implement administrator authentication (legacy command-version 0; session address adopted from the login ack).
+- [x] Encode all validated commands with a 30-test offline suite (`tests/test_client_protocol.py`): action bytes, user/schedule/record layouts, normally-open packed field, record mode mapping, auth payload.
+- [x] Gate unlock/write/destructive operations behind `allow_write` (`--allow-write`).
+- [ ] Implement BLE discovery (currently connects by configured address; add scan-by-name/service with RSSI + lock-id allowlist).
+- [ ] Run read-only commands against the physical lock from a PC with a BLE adapter.
+- [ ] Run unlock and one reversible user-management operation live.
 - [ ] Add structured packet logging with credential redaction.
+- [ ] Build the no-RTC clock automation (set-time on bind, battery-jump -> set-time) in the app/bridge layer above the library.
+- [ ] Implement the newer DES timestamp-challenge login path for non-v0 firmware.
 
 Exit criteria: the test client can reconnect and execute validated commands reliably without the HAHA app.
 
@@ -264,6 +270,8 @@ Public, original project artifacts:
 - `tools/btsnoop_analyzer.py` — redacting Android BTSnoop, L2CAP, ATT and HAHA frame analyzer.
 - `tests/test_protocol_codec.py` — synthetic protocol vectors and regression tests.
 - `tests/test_btsnoop_analyzer.py` — synthetic BTSnoop and pending-command correlation tests.
+- `client/` — Phase 3 desktop client package (protocol builders/parsers, auth, config, BLE transport via bleak, demand-driven session, CLI). Reference implementation for the ESP32 bridge.
+- `tests/test_client_protocol.py` — offline unit tests for the client protocol layer (30 vectors, no BLE).
 
 Local-only evidence:
 
@@ -313,6 +321,8 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Captured the **Settings** data fetch (`0x0F` empty -> 36-byte blob) and parameter writes. Confirmed remote-control pairing (selector 27: `0x0E` enters learning mode, lock pushes `0x89` notifications on each remote press, count 0->1 with a spoken success). Decoded the **normally-open** schedule as selector 18 with a 4-byte packed field `value = (weekday_mask<<22)|(end_min<<11)|start_min` (`1F E5 81 E0` = all days 08:00-20:00) and **auto-lock delay** as selector 18 with a 1-byte seconds value; normally-open was disabled again afterward to leave the lock secure.
 - Captured unlock-record download (`0xB2`/`0xB3`). First read returned 0 because app-BLE `0x88` unlocks are not logged; after physical PIN/fingerprint/card unlocks the lock returned three records. Decoded the 12-byte entry and mapped the mode byte: `0x01` fingerprint, `0x02` card, `0x04` PIN (same bit values as the `0x80` capability flags); all-users filter is `00000000`, direction byte `0x00` observed.
 - Captured firmware-upgrade check (cloud version query, returned "No updates"; image is vendor-cloud sourced, not app-local), **device reboot** (`0x81`, empty payload, ack 0), and **restore factory settings** (`0x0E` payload `00 00`, ack 0; lock spoke "initialization successful"). The factory reset unbinds and wipes the lock, which also cleaned up the test users `TEST1`/`ADMIN2`, the paired remote and all test settings. The lock now needs re-provisioning to be used again.
+- Opened Phase 3: scaffolded the `client/` desktop package (pure protocol builders/parsers, legacy auth, runtime config, bleak BLE transport, demand-driven session with gated writes, and a CLI). Added 30 offline unit tests that pin the builders/parsers to the captured values; all pass without BLE. Live-against-lock testing, BLE scan-by-name, redacted packet logging and the DES login path remain to do.
+- Recorded a critical hardware constraint: the lock has **no RTC**, so its clock resets on battery death/replacement. The Jenix app and ESP32 bridge must set time on bind and auto re-set it after a battery-level recovery; noted in operating constraints and the client README.
 
 ## Progress update rules
 

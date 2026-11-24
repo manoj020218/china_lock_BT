@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to jenix.config.json (git-ignored) and fill in. Never commit real values.",
+  "lock_id": "YOUR_LOCK_ID_HEX",
+  "address": "AA:BB:CC:DD:EE:FF",
+  "password": "YOUR_CONNECTION_PASSWORD",
+  "command_version": 0
+}

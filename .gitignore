@@ -16,6 +16,8 @@ captures/
 .env.*
 secrets.*
 credentials.*
+jenix.config.json
+**/jenix.config.json
 
 # ESP32 and editor build output
 .pio/
