@@ -48,7 +48,14 @@ The work will reverse engineer only the protocol needed for the client's owned o
 
 ## Verified evidence
 
-The following items were observed directly in HAHA Lock version 1.2.8. They are static-analysis findings until validated with live BLE captures.
+The following behavior was observed while operating HAHA Lock version 1.2.8 with the physical lock:
+
+- Opening the app automatically starts discovery and presents the nearby lock by its lock ID.
+- Selecting the unconfigured lock immediately opens the administrator-password setup flow.
+- After an administrator password is set successfully, the app exposes the complete lock-management UI.
+- The administrator password value is intentionally not recorded in this public project document.
+
+The following items were found through static application analysis and still require validation with live BLE captures:
 
 - The app is a uni-app package whose main application logic is available in `app-service.js`.
 - The app scans for and connects to BLE lock devices.
@@ -78,9 +85,9 @@ Preliminary command identifiers found in static code:
 
 | Feature | Evidence | Status |
 | --- | --- | --- |
-| Discover and connect to lock | BLE implementation found | In progress |
-| Bind/add lock | Bonding and ownership flags found | Not validated |
-| Administrator login | Login command and challenge logic found | In progress |
+| Discover and connect to lock | Automatic discovery and lock-ID selection observed | App flow confirmed; packets pending |
+| Bind/add lock | Initial administrator setup observed; bonding flags found | App flow confirmed; packets pending |
+| Administrator login | Full management UI available after administrator setup | App flow confirmed; protocol pending |
 | Change administrator/login key | Command builder found | Not validated |
 | Unlock | Command builder found | Not validated |
 | Set lock time | App workflow found | Not validated |
@@ -142,6 +149,8 @@ Exit criteria: a protocol specification can encode and decode captured packets w
 ### Phase 2 Controlled BLE capture — Not started
 
 - [ ] Enable Android Bluetooth HCI snoop logging.
+- [ ] Capture automatic discovery and lock-ID selection.
+- [ ] Capture initial administrator setup on a test or safely resettable lock without publishing credentials.
 - [ ] Record clean connect and administrator-login sessions.
 - [ ] Capture one operation at a time: version, battery, time and unlock.
 - [ ] Capture user, PIN, RFID and fingerprint workflows using test identities.
@@ -261,6 +270,7 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Created the project objective, phased plan, feature matrix and progress-tracking rules.
 - Prepared the public Git repository policy so progress and original project code can be published without uploading vendor APKs, extracted code, captures or credentials.
 - Initialized and published the project baseline to `manoj020218/china_lock_BT` on the `main` branch.
+- Recorded the observed onboarding flow: automatic lock discovery, selection by lock ID, administrator-password setup and access to the full management UI.
 
 ## Progress update rules
 
