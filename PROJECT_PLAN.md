@@ -260,6 +260,7 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Found preliminary command IDs for login, version, unlock, battery, users and records.
 - Created the project objective, phased plan, feature matrix and progress-tracking rules.
 - Prepared the public Git repository policy so progress and original project code can be published without uploading vendor APKs, extracted code, captures or credentials.
+- Initialized and published the project baseline to `manoj020218/china_lock_BT` on the `main` branch.
 
 ## Progress update rules
 
