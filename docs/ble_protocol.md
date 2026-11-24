@@ -187,7 +187,7 @@ The payload column describes the app's static builder. Commands without a builde
 | `0x85` | Erase flash | address BE32, length BE16 |
 | `0x86` | Write flash | address BE32, up to 256 data bytes |
 | `0x87` | Read flash | address BE32, length BE16 |
-| `0x88` | Unlock/lock action | action byte, user ID BE32, ASCII unlock PIN |
+| `0x88` | Unlock/lock action | action byte (`0x01` unlock, `0x00` lock, live-confirmed), user ID BE32, ASCII unlock PIN |
 | `0x89` | Asynchronous notification | incoming only in the observed flow |
 | `0x8A` | Set time | YY MM DD hh mm ss, timezone offset minutes BE16 |
 | `0x8B` | Get time | empty |
@@ -202,7 +202,7 @@ The payload column describes the app's static builder. Commands without a builde
 | `0xA5` | Fingerprint upload | fingerprint ID, offset and length as BE16 values |
 | `0xA6` | Fingerprint download | fingerprint ID, offset, length as BE16, then data |
 | `0xA8` | Get enrollment status | empty |
-| `0xA9` | Start credential enrollment | type byte, user ID BE32, optional ASCII PIN for type 2 |
+| `0xA9` | Start credential enrollment | type byte (1 fingerprint, 2 PIN, 3 card — live-confirmed), user ID BE32, ASCII PIN inline only for type 2; types 1/3 captured at the lock and read via `0xA8` polling |
 | `0xAA` | Cancel enrollment | empty |
 | `0xAB` | Delete one credential type | user ID BE32, type byte |
 | `0xB2` | Query record count | user ID BE32, start YY MM DD, end YY MM DD |
@@ -236,7 +236,7 @@ The 60-byte user structure is:
 | 40 | 8 | PIN encoded as hexadecimal nibbles and padded with `F` |
 | 48 | 12 | Validity and schedule block |
 
-The schedule block contains start and end dates, optional daily start/end times, weekday bits and a reserved byte. The permanent default is `00 01 01 63 0C 1F 00 00 17 3B 7F 00`.
+The schedule block contains start and end dates, optional daily start/end times, weekday bits and a reserved byte. The permanent default is `00 01 01 63 0C 1F 00 00 17 3B 7F 00`. Live-confirmed layout: bytes 0-2 start `YY MM DD`, bytes 3-5 end `YY MM DD`, bytes 6-7 daily start `hh mm`, bytes 8-9 daily end `hh mm`, byte 10 weekday/flags, byte 11 reserved. A captured one-day custom window (2026-11-24) was `1A 0B 18 1A 0B 18 00 00 17 3B BE 00`.
 
 `getUser(0, 1)` starts sequential enumeration. The app continues with `getUser(1, 1)` until the response returns no users. `getUser(2, userId)` retrieves one user.
 
@@ -290,6 +290,12 @@ Because the generator is server-side, its algorithm cannot be recovered through 
 ## Settings selectors
 
 Known selector indexes include volume `2`, BLE advertising `3`, card wakeup `8`, IR wakeup `9`, Wi-Fi `10`, IR distance `11`, door debounce `17`, lock delay `18`, door direction `21`, motor power `22`, remote sender `27`, sleep `28`, maximum retry count `29`, retry lock time `30` and tamper alarm `31`. Language uses selector `32`. A normally-open schedule is encoded through selector `18` in a packed 32-bit field by a dedicated builder branch.
+
+Live-confirmed selector behavior on `BK50D-V2.5`:
+
+- `0x0F` get-parameter with empty payload returns a 36-byte blob of all settings; with a one-byte selector it returns just that parameter.
+- Selector `18` is overloaded by `0x0E` payload length: a **one-byte** value sets the auto-lock delay in seconds; a **four-byte** value sets the normally-open packed schedule `value = (weekday_mask << 22) | (end_minute << 11) | start_minute` (captured `1F E5 81 E0` = all days, 08:00-20:00).
+- Selector `27` is remote-sender: `0x0F` reads the paired count, `0x0E` enters learning mode, and the lock then pushes a `0x89` async-notification (first byte `4`) on each remote RF press.
 
 ## Phase 2 validation list
 

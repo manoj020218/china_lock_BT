@@ -74,12 +74,12 @@ Command identifiers mapped from the static application code:
 | Set login key | `0x12` | Static evidence only |
 | Administrator login | `0x13` | Static evidence only |
 | Get version/capabilities | `0x80` | Static evidence only |
-| Unlock | `0x88` | Static evidence only |
+| Unlock | `0x88` | Validated (action `0x01` unlock, `0x00` lock) |
 | Read battery | `0x8C` | Static evidence only |
 | System lock control | `0x8D` | Static evidence only |
 | User operation range | `0xA0` onward | Statically mapped; live validation pending |
-| Read record count | `0xB2` | Static evidence only |
-| Read records | `0xB3` | Static evidence only |
+| Read record count | `0xB2` | Validated (all-users filter `00000000`, date `YY MM DD`) |
+| Read records | `0xB3` | Validated (offset+count; 12-byte entries, mode byte) |
 
 ## Feature feasibility matrix
 
@@ -89,16 +89,16 @@ Command identifiers mapped from the static application code:
 | Bind/add lock | Initial administrator setup observed; bonding flags found | App flow confirmed; packets pending |
 | Administrator login | Full management UI available after administrator setup | App flow confirmed; protocol pending |
 | Change administrator/login key | Command builder found | Not validated |
-| Unlock | Command builder found | Not validated |
-| Set lock time | App workflow found | Not validated |
-| Battery percentage/voltage | Command and response parser found | Not validated |
+| Unlock | `0x88` action `0x01` captured; lock physically opened | Validated on BK50D-V2.5 |
+| Set lock time | `0x8A` set-time error 0 from onboarding and dashboard | Validated |
+| Battery percentage/voltage | `0x8C` returned 100%% / 5.8-5.9 V | Validated |
 | Low-battery alarm | Battery telemetry exists | Threshold/event unknown |
-| Admin/general users | Role values and 60-byte user structure mapped | Static mapping complete; live validation pending |
-| PIN management | Enrollment and storage format mapped | Static mapping complete; live validation pending |
-| RFID management | Enrollment and storage format mapped | Static mapping complete; live validation pending |
-| Fingerprint management | Enrollment and fingerprint commands mapped | Static mapping complete; live validation pending |
-| Temporary/offline password | Legacy local algorithm mapped; newer mode is vendor-server generated | Partially feasible offline; live validation pending |
-| Unlock history | Query, pagination and 12-byte record layout mapped | Static mapping complete; live validation pending |
+| Admin/general users | General test user created via `0xA4` and read back | Create/read validated; delete pending |
+| PIN management | `0xA9` type 2 enrolled a PIN inline, no presentation needed | Enroll validated; keypad open test pending |
+| RFID management | `0xA9` type 3 enroll + `0xA8` poll; card swiped at lock, counter 0->1 | Enroll validated |
+| Fingerprint management | `0xA9` type 1 enroll + `0xA8` poll; 3 presentations, counter 0->1 | Enroll validated |
+| Temporary/offline password | Legacy local 5-min KG5 confirmed on-screen; fixed window, no custom duration on this firmware | Legacy path confirmed; server mode N/A here |
+| Unlock history | `0xB2`/`0xB3` validated; 12-byte entry + mode byte (finger/card/PIN) decoded from physical unlocks | Validated |
 | Attendance export | Attendance-report capability flag found | Not validated |
 | Emergency unlock | Normal BLE unlock found | Firmware behavior unknown |
 
@@ -153,8 +153,12 @@ Exit criteria: a protocol specification can encode and decode captured packets w
 - [x] Capture connection-password setup after a fresh app install without publishing credentials.
 - [x] Record clean connect and administrator-login sessions.
 - [x] Capture one operation at a time: version, battery, time and unlock.
-- [ ] Capture user, PIN, RFID and fingerprint workflows using test identities.
-- [ ] Capture record and attendance downloads.
+- [x] Capture a wrong-password re-provisioning attempt and confirm the lock's error-33 rejection.
+- [x] Capture a clean factory-reset re-provisioning and a physically confirmed lock and unlock (`0x88` action `0x00`/`0x01`).
+- [x] Capture user creation and PIN enrollment with a test identity (`0xA0`/`0xA1`/`0xA4`/`0xA9` type 2); RFID and fingerprint still pending.
+- [x] Capture RFID and fingerprint enrollment with a person presenting credentials (`0xA9` type 1/3 + `0xA8` status polling).
+- [x] Capture per-user Valid time (`0xA4` schedule block) and an Admin-role user (group byte 1).
+- [x] Capture record download (`0xB2`/`0xB3`): all-users filter `00000000`, mode byte 0x01 finger / 0x02 card / 0x04 PIN; app-BLE unlocks are not logged.
 - [ ] Compare live packets with the static command implementation.
 - [x] Record lock model, firmware version and capability flags.
 
@@ -298,6 +302,17 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Captured the fresh-install Add Device flow, including the `Lck1_` advertisement, empty-login probe, UID/time setup and `0x12` login-key provisioning.
 - Confirmed that this firmware advertises name and service fields without manufacturer-specific data.
 - Captured and physically confirmed a successful unlock after the app created its default 60-byte general user.
+- Captured a wrong-password **Set connection password** attempt on the already-bound lock: the lock rejected the `0x8A` set-time step with error `33` (administrator authentication failed), the app aborted before `0x12`, and no lock state changed. This live-confirms error code `33` and that re-provisioning requires the lock's current password rather than acting as an unconditional reset.
+- After an owner-performed factory reset, captured a clean re-provisioning (`0x80`,`0x82`,`0x8A`,`0x12` all error 0); the lock kept its hardware ID but cleared its binding, confirming the reset path.
+- Physically confirmed unlock and lock from the dashboard: both use command `0x88` with action byte `0x01` (unlock) and `0x00` (lock); `0x8D` was not used. The lock opened and then locked on command.
+- Confirmed the **Temporary password** screen is the legacy local 5-minute KG5 generator: the six-digit code is computed on the phone with no BLE or network, the validity is a fixed rolling 5-minute window, and this firmware exposes no adjustable OTP duration there.
+- Captured user creation and PIN enrollment for a General test user `TEST1`: `0xA1` get-counts, `0xA0` get-free-user-id, `0xA4` set-user (60 bytes), `0xA3` read-back, then `0xA9` start-enrollment type `2` with the PIN inline (error 0). PIN enrollment needs no physical presentation; the per-user password counter went 0 to 1. `TEST1` is a throwaway test identity to be deleted during cleanup.
+- Captured fingerprint (`0xA9` type 1) and RFID card (`0xA9` type 3) enrollment with physical presentation: both send only type+user ID, then the app polls `0xA8` get-enrollment-status until the lock reports completion; PIN (type 2) is inline instead. Per-credential counters went 0 to 1.
+- Captured the per-user **Valid time** flow: Permanent/Custom with date+time effective/expiration and a weekly repeat option; applying a custom window writes `0xA4` with the 12-byte schedule block (decoded start/end date, daily times; weekday/flags byte still to resolve).
+- Created an **Admin-role** test user `ADMIN2` (user ID 2) and confirmed the 60-byte structure's group byte is `1` for admin vs `2` for general. `TEST1` and `ADMIN2` are throwaway identities to delete at cleanup.
+- Captured the **Settings** data fetch (`0x0F` empty -> 36-byte blob) and parameter writes. Confirmed remote-control pairing (selector 27: `0x0E` enters learning mode, lock pushes `0x89` notifications on each remote press, count 0->1 with a spoken success). Decoded the **normally-open** schedule as selector 18 with a 4-byte packed field `value = (weekday_mask<<22)|(end_min<<11)|start_min` (`1F E5 81 E0` = all days 08:00-20:00) and **auto-lock delay** as selector 18 with a 1-byte seconds value; normally-open was disabled again afterward to leave the lock secure.
+- Captured unlock-record download (`0xB2`/`0xB3`). First read returned 0 because app-BLE `0x88` unlocks are not logged; after physical PIN/fingerprint/card unlocks the lock returned three records. Decoded the 12-byte entry and mapped the mode byte: `0x01` fingerprint, `0x02` card, `0x04` PIN (same bit values as the `0x80` capability flags); all-users filter is `00000000`, direction byte `0x00` observed.
+- Captured firmware-upgrade check (cloud version query, returned "No updates"; image is vendor-cloud sourced, not app-local), **device reboot** (`0x81`, empty payload, ack 0), and **restore factory settings** (`0x0E` payload `00 00`, ack 0; lock spoke "initialization successful"). The factory reset unbinds and wipes the lock, which also cleaned up the test users `TEST1`/`ADMIN2`, the paired remote and all test settings. The lock now needs re-provisioning to be used again.
 
 ## Progress update rules
 
