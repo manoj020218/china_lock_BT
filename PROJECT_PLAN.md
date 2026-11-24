@@ -1,8 +1,8 @@
 # HAHA Lock ESP32 LAN Bridge Project
 
 Last updated: 2026-11-24  
-Current phase: Phase 1 complete; awaiting authorization for Phase 2
-Overall state: Paused at the Phase 2 approval gate
+Current phase: Phase 2 controlled BLE capture
+Overall state: In progress
 
 ## Project objective
 
@@ -146,17 +146,17 @@ Exit criteria: project scope, evidence locations and next steps are documented.
 
 Exit criteria: a protocol specification can encode and decode captured packets without relying on the app.
 
-### Phase 2 Controlled BLE capture — Not started
+### Phase 2 Controlled BLE capture — In progress
 
-- [ ] Enable Android Bluetooth HCI snoop logging.
+- [x] Enable Android Bluetooth HCI snoop logging.
 - [ ] Capture automatic discovery and lock-ID selection.
 - [ ] Capture initial administrator setup on a test or safely resettable lock without publishing credentials.
-- [ ] Record clean connect and administrator-login sessions.
-- [ ] Capture one operation at a time: version, battery, time and unlock.
+- [x] Record clean connect and administrator-login sessions.
+- [x] Capture one operation at a time: version, battery, time and unlock.
 - [ ] Capture user, PIN, RFID and fingerprint workflows using test identities.
 - [ ] Capture record and attendance downloads.
 - [ ] Compare live packets with the static command implementation.
-- [ ] Record lock model, firmware version and capability flags.
+- [x] Record lock model, firmware version and capability flags.
 
 Exit criteria: captured request and response packets agree with the protocol specification for the target lock.
 
@@ -255,8 +255,11 @@ After authorization:
 Public, original project artifacts:
 
 - `docs/ble_protocol.md` — sanitized static protocol specification and Phase 2 validation list.
+- `docs/live_validation.md` — sanitized live-capture findings and target-firmware differences.
 - `tools/protocol_codec.py` — offline frame encoder, validated decoder, stream reassembler and credential-key derivation helpers.
+- `tools/btsnoop_analyzer.py` — redacting Android BTSnoop, L2CAP, ATT and HAHA frame analyzer.
 - `tests/test_protocol_codec.py` — synthetic protocol vectors and regression tests.
+- `tests/test_btsnoop_analyzer.py` — synthetic BTSnoop and pending-command correlation tests.
 
 Local-only evidence:
 
@@ -287,6 +290,11 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Added an offline protocol codec and seven synthetic regression tests; no Bluetooth communication or lock state change is performed by this code.
 - Confirmed that the newer offline-password generator is vendor-server-side and cannot be recovered from the APK alone.
 - Closed Phase 1 and stopped at the authorization gate before controlled BLE capture.
+- Began Phase 2 after explicit user authorization and enabled full Bluetooth HCI snoop logging on the Android phone.
+- Captured and decoded successful version, administrator login, battery, get/set time, user-read and lock-action transactions.
+- Confirmed target firmware `BK50D-V2.5`, legacy command version zero, live `FFE0`/`FFE1`/`FFE2` handles, flag-7 acknowledgements and checksum behavior.
+- Confirmed that the app uses demand-driven BLE sessions and receives a new protocol session address after reconnect.
+- Added a redacting BTSnoop analyzer and expanded the synthetic regression suite to ten passing tests.
 
 ## Progress update rules
 
