@@ -274,11 +274,11 @@ export const api = {
   setNormallyOpen: (
     gw: GatewayTarget,
     lock: string,
-    cfg: { enabled: boolean; start_min: number; end_min: number; weekday_mask: number }
+    cfg: { start_minute: number; end_minute: number; weekday_mask: number }
   ) => request<{ ok: boolean }>(gw, "POST", "/api/settings/normally-open", { query: { lock }, body: cfg }),
 
   factoryReset: (gw: GatewayTarget, lock: string) =>
-    request<{ ok: boolean }>(gw, "POST", "/api/settings/factory-reset", { query: { lock }, body: { confirm: true } }),
+    request<{ ok: boolean }>(gw, "POST", "/api/settings/factory-reset", { query: { lock }, body: { confirm: "RESET" } }),
 
   cloudGet: (gw: GatewayTarget) => request<Record<string, unknown>>(gw, "GET", "/api/cloud"),
 

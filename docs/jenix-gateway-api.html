@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jenix Lock Gateway — API &amp; Integration Guide</title>
+<meta name="description" content="REST API and integration reference for the Jenix Lock Gateway (ESP32-S3). Control Jenix/HAHA BLE smart locks from your own software over Wi-Fi.">
+<style>
+  :root{
+    --bg:#0b1020; --bg2:#0f1630; --panel:#121a35; --panel2:#0d142b;
+    --stroke:#24305a; --stroke-soft:#1b244a;
+    --text:#e9edff; --muted:#9aa6cf; --faint:#6d7aa6;
+    --accent:#6ea8ff; --accent2:#9b7bff;
+    --get:#35d393; --post:#ffb648; --del:#ff6b6b;
+    --code-bg:#0a0f22; --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--sans);color:var(--text);
+    background:
+      radial-gradient(1100px 620px at 85% -8%,rgba(123,97,255,.22),transparent 60%),
+      radial-gradient(900px 560px at -8% 4%,rgba(78,140,255,.2),transparent 55%),
+      linear-gradient(180deg,#0e1530,#0b1020 60%);
+    background-attachment:fixed;line-height:1.6;}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+
+  .layout{display:grid;grid-template-columns:270px 1fr;max-width:1180px;margin:0 auto;gap:0}
+  /* sidebar */
+  aside{position:sticky;top:0;height:100vh;overflow-y:auto;padding:26px 18px 40px;
+    border-right:1px solid var(--stroke-soft)}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+  .brand .logo{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0f22;font-size:20px}
+  .brand .n{font-weight:750;font-size:16px;letter-spacing:.2px}
+  .brand .s{font-size:11.5px;color:var(--muted)}
+  nav{margin-top:18px;font-size:13.5px}
+  nav .grp{color:var(--faint);text-transform:uppercase;letter-spacing:.09em;font-size:11px;font-weight:700;
+    margin:18px 0 7px}
+  nav a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;margin:1px 0}
+  nav a:hover{color:var(--text);background:rgba(255,255,255,.04);text-decoration:none}
+
+  main{padding:40px 44px 90px;min-width:0}
+  header.hero{margin-bottom:30px}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent);background:rgba(110,168,255,.1);border:1px solid rgba(110,168,255,.3);
+    padding:4px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 10px;letter-spacing:-.4px}
+  .lead{font-size:16.5px;color:var(--muted);max-width:720px}
+  h2{font-size:23px;margin:46px 0 14px;padding-top:14px;letter-spacing:-.2px}
+  h3{font-size:16.5px;margin:26px 0 8px}
+  p{color:#cdd5f2}
+  .muted{color:var(--muted)}
+
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01));
+    border:1px solid var(--stroke-soft);border-radius:16px;padding:18px 20px;margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--stroke-soft);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  td code{color:#d7e0ff}
+
+  /* endpoint */
+  .ep{border:1px solid var(--stroke-soft);border-radius:14px;margin:16px 0;overflow:hidden;
+    background:rgba(255,255,255,.015)}
+  .ep>.head{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:default;
+    border-bottom:1px solid var(--stroke-soft);background:rgba(255,255,255,.02)}
+  .m{font-size:11.5px;font-weight:800;letter-spacing:.05em;padding:4px 9px;border-radius:7px;flex:none}
+  .m.get{color:#07140d;background:var(--get)}
+  .m.post{color:#1c1203;background:var(--post)}
+  .m.del{color:#1c0606;background:var(--del);color:#fff}
+  .path{font-family:var(--mono);font-size:14.5px;color:#e9edff;font-weight:600;word-break:break-all}
+  .auth{margin-left:auto;font-size:11px;color:var(--faint);border:1px solid var(--stroke-soft);
+    padding:3px 8px;border-radius:999px;white-space:nowrap}
+  .auth.open{color:var(--get);border-color:rgba(53,211,147,.4)}
+  .ep .body{padding:14px 16px}
+  .ep .body p{margin:.2em 0 .8em;font-size:14.5px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;
+    margin:14px 0 6px}
+
+  pre{background:var(--code-bg);border:1px solid var(--stroke-soft);border-radius:11px;
+    padding:13px 15px;overflow-x:auto;font-size:13px;margin:6px 0;line-height:1.55}
+  pre code{color:#cfe0ff}
+  .tok-key{color:#8fb7ff}.tok-str{color:#9be8c0}.tok-num{color:#ffcf8f}.tok-bool{color:#c3a6ff}
+  .tok-c{color:#5e6a92}
+  :not(pre)>code{background:rgba(255,255,255,.07);border:1px solid var(--stroke-soft);
+    padding:1px 6px;border-radius:6px;font-size:12.8px;color:#dbe4ff}
+
+  .note{border-left:3px solid var(--accent);background:rgba(110,168,255,.07);
+    padding:11px 15px;border-radius:0 10px 10px 0;margin:14px 0;font-size:14px}
+  .note.warn{border-color:var(--post);background:rgba(255,182,72,.08)}
+  .note.danger{border-color:var(--del);background:rgba(255,107,107,.08)}
+  .note b{color:#fff}
+
+  .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--stroke-soft);border-radius:999px;padding:4px 11px}
+
+  footer{max-width:1180px;margin:0 auto;padding:26px 44px 50px;border-top:1px solid var(--stroke-soft);
+    color:var(--faint);font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+
+  /* diagram */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:14px 0}
+  .flow .node{flex:1;min-width:130px;background:rgba(255,255,255,.03);border:1px solid var(--stroke-soft);
+    border-radius:12px;padding:12px 14px;text-align:center}
+  .flow .node .t{font-weight:700;font-size:14px}
+  .flow .node .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .flow .arr{display:grid;place-items:center;padding:0 8px;color:var(--accent);font-size:20px;min-width:40px}
+  .flow .arr small{display:block;font-size:9.5px;color:var(--faint);letter-spacing:.03em}
+  @media(max-width:760px){
+    .layout{grid-template-columns:1fr}
+    aside{position:static;height:auto;border-right:none;border-bottom:1px solid var(--stroke-soft)}
+    nav{columns:2}
+    main{padding:28px 20px 70px}
+    .flow .arr{transform:rotate(90deg)}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand">
+      <div class="logo">&#128274;</div>
+      <div>
+        <div class="n">Jenix Lock Gateway</div>
+        <div class="s">API &amp; Integration Guide</div>
+      </div>
+    </div>
+    <nav>
+      <div class="grp">Start here</div>
+      <a href="#overview">Overview</a>
+      <a href="#architecture">How it works</a>
+      <a href="#quickstart">Quick start</a>
+      <div class="grp">Conventions</div>
+      <a href="#base">Base URL &amp; auth</a>
+      <a href="#locks-select">Selecting a lock</a>
+      <a href="#responses">Responses &amp; errors</a>
+      <a href="#reach">Reachability</a>
+      <div class="grp">Endpoints</div>
+      <a href="#ep-health">Status &amp; discovery</a>
+      <a href="#ep-bind">Binding locks</a>
+      <a href="#ep-ops">Lock operations</a>
+      <a href="#ep-users">Users</a>
+      <a href="#ep-enroll">Credential enrollment</a>
+      <a href="#ep-records">Access records</a>
+      <a href="#ep-settings">Lock settings</a>
+      <div class="grp">Platform</div>
+      <a href="#cloud">Cloud (MQTT)</a>
+      <a href="#ota">Firmware update (OTA)</a>
+      <a href="#provision">Wi-Fi provisioning</a>
+      <a href="#notes">Integration notes</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="hero" id="overview">
+      <span class="tag">Integration Guide &middot; v1</span>
+      <h1>Jenix Lock Gateway API</h1>
+      <p class="lead">The Jenix Lock Gateway is a Wi-Fi bridge that lets your software control Jenix / HAHA
+      Bluetooth smart locks over a simple, authenticated HTTP API. Your application talks to the gateway on the
+      local network (or through your own cloud); the gateway handles all Bluetooth communication with the locks.
+      One gateway can manage several locks.</p>
+    </header>
+
+    <div class="pillrow">
+      <span class="pill">Transport: HTTP/JSON over Wi-Fi (LAN)</span>
+      <span class="pill">Auth: Bearer token</span>
+      <span class="pill">Hardware: ESP32-S3</span>
+      <span class="pill">Optional cloud: MQTT</span>
+      <span class="pill">Multi-lock per gateway</span>
+    </div>
+
+    <h2 id="architecture">How it works</h2>
+    <p>Your software never speaks Bluetooth. It sends normal HTTP requests to the gateway; the gateway keeps a
+    secure session to each lock and translates your commands into the lock's native BLE protocol.</p>
+    <div class="flow">
+      <div class="node"><div class="t">Your software</div><div class="d">web, mobile, server or PLC</div></div>
+      <div class="arr">&#8594;<small>HTTP / JSON</small></div>
+      <div class="node"><div class="t">Jenix Gateway</div><div class="d">ESP32-S3 on Wi-Fi</div></div>
+      <div class="arr">&#8594;<small>Bluetooth LE</small></div>
+      <div class="node"><div class="t">Smart lock(s)</div><div class="d">Jenix / HAHA</div></div>
+    </div>
+    <div class="note"><b>No-RTC locks.</b> The locks have no real-time clock, so their time resets after a battery
+    change. The gateway synchronises time automatically over NTP on first connect and after a battery recovery —
+    your software does not need to manage lock time, though <code>POST /api/time</code> is available.</div>
+
+    <h2 id="quickstart">Quick start</h2>
+    <p>Every request (except <code>/api/health</code>) carries the gateway's API token. Replace
+    <code>&lt;gateway-ip&gt;</code> with the gateway's address on your network and <code>&lt;API_TOKEN&gt;</code>
+    with its token (printed on the gateway's serial console and shown in the Jenix Lock app).</p>
+    <pre><code class="tok-c"># 1. Is the gateway up? (no auth)</code>
+curl http://<span class="tok-str">&lt;gateway-ip&gt;</span>/api/health
+
+<code class="tok-c"># 2. List the locks this gateway manages</code>
+curl -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"</span> \
+     http://<span class="tok-str">&lt;gateway-ip&gt;</span>/api/locks
+
+<code class="tok-c"># 3. Unlock a lock</code>
+curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"</span> \
+     -H <span class="tok-str">"Content-Type: application/json"</span> \
+     -d <span class="tok-str">'{"user":1,"pin":"135790"}'</span> \
+     <span class="tok-c">"</span>http://<span class="tok-str">&lt;gateway-ip&gt;</span>/api/unlock?lock=<span class="tok-str">&lt;lock-id&gt;</span><span class="tok-c">"</span></pre>
+
+    <h2 id="base">Base URL &amp; authentication</h2>
+    <table>
+      <tr><th>Item</th><th>Value</th></tr>
+      <tr><td>Base URL</td><td><code>http://&lt;gateway-ip&gt;</code> &nbsp;(plain HTTP on the LAN; discoverable at <code>jenixlock.local</code> via mDNS)</td></tr>
+      <tr><td>Auth header</td><td><code>Authorization: Bearer &lt;API_TOKEN&gt;</code> on every endpoint except <code>GET /api/health</code></td></tr>
+      <tr><td>Request body</td><td>JSON, with <code>Content-Type: application/json</code> on POST requests that take a body</td></tr>
+      <tr><td>Response</td><td>JSON, always including a boolean <code>ok</code> field</td></tr>
+    </table>
+    <div class="note warn"><b>Keep the token secret.</b> It grants full control of every lock on the gateway.
+    Treat it like a password: store it server-side, never embed it in a public web page or mobile binary you
+    cannot control. Rotate it by factory-resetting the gateway if it is exposed.</div>
+
+    <h2 id="locks-select">Selecting a lock</h2>
+    <p>A gateway can hold several locks, so operation endpoints need to know which one. You can specify the lock
+    in either of two ways:</p>
+    <table>
+      <tr><th>Method</th><th>Example</th></tr>
+      <tr><td>Query string <span class="muted">(works for GET and POST)</span></td><td><code>POST /api/unlock?lock=8F3EE684ECE3</code></td></tr>
+      <tr><td>Body field <span class="muted">(POST only)</span></td><td><code>{"lock":"8F3EE684ECE3","user":1,"pin":"1234"}</code></td></tr>
+    </table>
+    <p class="muted">If the gateway has exactly <b>one</b> bound lock, you may omit the selector entirely and it
+    will be used by default. The <code>lock</code> value is the lock's ID as returned by <code>GET /api/locks</code>.</p>
+
+    <h2 id="responses">Responses &amp; errors</h2>
+    <p>Success responses return HTTP 200 with <code>"ok": true</code> and any result fields. Failures return an
+    HTTP error status with a machine-readable envelope:</p>
+    <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">false</span>, <span class="tok-key">"error"</span>: <span class="tok-str">"lock not bound: 8F3EE684ECE3"</span> }</code></pre>
+    <table>
+      <tr><th>Status</th><th>Meaning</th></tr>
+      <tr><td><code>200</code></td><td>Success (<code>ok: true</code>).</td></tr>
+      <tr><td><code>400</code></td><td>Bad request — malformed JSON or a missing/invalid field.</td></tr>
+      <tr><td><code>401</code></td><td>Missing or wrong bearer token.</td></tr>
+      <tr><td><code>404</code></td><td>Unknown endpoint, or lock not found for an unbind.</td></tr>
+      <tr><td><code>502</code></td><td>The lock could not be reached or the BLE operation failed — see below.</td></tr>
+    </table>
+
+    <h2 id="reach">Reachability — did the command reach the lock?</h2>
+    <div class="note"><b>Guaranteed delivery semantics.</b> Before every command the gateway checks that the lock is
+    advertising and within signal range. If the lock is out of range, asleep, or the signal is too weak, the
+    gateway returns <code>502</code> with a clear message and <b>does not send the command</b>. A <code>200 / ok:true</code>
+    therefore means the command actually reached the lock — your software never has to guess.</div>
+    <pre><code class="tok-c">// weak signal — command was NOT sent</code>
+{ <span class="tok-key">"ok"</span>:<span class="tok-bool">false</span>, <span class="tok-key">"error"</span>:<span class="tok-str">"lock not reachable: weak signal (RSSI -94 dBm, need &gt;= -92); command NOT sent"</span> }
+<code class="tok-c">// lock not advertising (out of range or asleep)</code>
+{ <span class="tok-key">"ok"</span>:<span class="tok-bool">false</span>, <span class="tok-key">"error"</span>:<span class="tok-str">"lock not reachable: not advertising (out of range or asleep)"</span> }</code></pre>
+
+    <!-- ============ ENDPOINTS ============ -->
+    <h2 id="ep-health">Status &amp; discovery</h2>
+
+    <div class="ep" id="ep-health-c">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/health</span><span class="auth open">No auth</span></div>
+      <div class="body">
+        <p>Liveness and summary. The only unauthenticated endpoint — use it to confirm the gateway is reachable.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"firmware"</span>: <span class="tok-str">"jenix-gateway"</span>,
+  <span class="tok-key">"wifi"</span>: <span class="tok-str">"192.168.1.217"</span>,   <span class="tok-c">// gateway IP</span>
+  <span class="tok-key">"ntp"</span>: <span class="tok-bool">true</span>,              <span class="tok-c">// clock synced</span>
+  <span class="tok-key">"locks"</span>: <span class="tok-num">1</span>,                <span class="tok-c">// bound locks</span>
+  <span class="tok-key">"lock_connected"</span>: <span class="tok-bool">false</span>   <span class="tok-c">// a BLE session is currently open</span>
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/locks</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>List the locks bound to this gateway. Passwords are never returned.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"locks"</span>: [
+    { <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span>, <span class="tok-key">"tz_minutes"</span>: <span class="tok-num">330</span> }
+  ]
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/scan</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Scan for Jenix/HAHA locks advertising near the gateway. Use the returned <code>name</code> as the
+        <code>lock_id</code> when binding. Takes a few seconds.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"locks"</span>: [
+    { <span class="tok-key">"address"</span>: <span class="tok-str">"aa:bb:cc:dd:ee:ff"</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"8F3EE684ECE3"</span>, <span class="tok-key">"rssi"</span>: <span class="tok-num">-61</span> }
+  ]
+}</code></pre>
+      </div>
+    </div>
+
+    <h2 id="ep-bind">Binding locks</h2>
+    <p class="muted">Binding stores the lock's BLE password in the gateway so it can open a session later; the
+    password is sent only once and never returned.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/bind</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Bind a lock to the gateway.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span>,   <span class="tok-c">// required</span>
+  <span class="tok-key">"password"</span>: <span class="tok-str">"123456"</span>,        <span class="tok-c">// required — the lock's BLE connection password</span>
+  <span class="tok-key">"tz_minutes"</span>: <span class="tok-num">330</span>           <span class="tok-c">// optional — minutes east of UTC (IST = 330)</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/unbind</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Remove a lock from the gateway.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span> }</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }   <span class="tok-c">// 404 if the lock was not bound</span></code></pre>
+      </div>
+    </div>
+
+    <h2 id="ep-ops">Lock operations</h2>
+    <p class="muted">All operation endpoints accept <code>?lock=&lt;lock_id&gt;</code> (or a <code>"lock"</code> body
+    field), defaulting to the only bound lock.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/unlock</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Open the lock. <code>user</code> and <code>pin</code> identify an authorised user on the lock.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"user"</span>: <span class="tok-num">1</span>, <span class="tok-key">"pin"</span>: <span class="tok-str">"135790"</span> }</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/lock</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Close / re-lock. Same body as unlock.</p>
+        <pre><code>{ <span class="tok-key">"user"</span>: <span class="tok-num">1</span>, <span class="tok-key">"pin"</span>: <span class="tok-str">"135790"</span> }  <span class="tok-c">// -&gt; { "ok": true }</span></code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/version</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"firmware"</span>: <span class="tok-str">"BK50D-V2.5"</span>,
+  <span class="tok-key">"command_version"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"admin_exists"</span>: <span class="tok-bool">true</span>
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/battery</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"percent"</span>: <span class="tok-num">100</span>, <span class="tok-key">"voltage"</span>: <span class="tok-num">5.7</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/time</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Read the lock's clock.</p>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"time"</span>: <span class="tok-str">"2026-11-25 17:04:39"</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/time</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Set the lock's clock. Send an explicit time, or send an empty body to use the gateway's NTP time.</p>
+        <div class="lbl">Request body (all fields optional)</div>
+        <pre><code>{
+  <span class="tok-key">"year"</span>: <span class="tok-num">2026</span>, <span class="tok-key">"month"</span>: <span class="tok-num">11</span>, <span class="tok-key">"day"</span>: <span class="tok-num">25</span>,
+  <span class="tok-key">"hour"</span>: <span class="tok-num">17</span>, <span class="tok-key">"minute"</span>: <span class="tok-num">4</span>, <span class="tok-key">"second"</span>: <span class="tok-num">0</span>,
+  <span class="tok-key">"tz_minutes"</span>: <span class="tok-num">330</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/reboot</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Reboot the lock. Empty body. <code>-&gt; { "ok": true }</code></p>
+      </div>
+    </div>
+
+    <h2 id="ep-users">Users</h2>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/users</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"users"</span>: [
+    { <span class="tok-key">"id"</span>: <span class="tok-num">1</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Admin"</span>, <span class="tok-key">"group"</span>: <span class="tok-str">"admin"</span> },
+    { <span class="tok-key">"id"</span>: <span class="tok-num">2</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Staff"</span>, <span class="tok-key">"group"</span>: <span class="tok-str">"general"</span> }
+  ]
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/users</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Create a user. Returns the new user id.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"name"</span>: <span class="tok-str">"Staff"</span>,
+  <span class="tok-key">"group"</span>: <span class="tok-str">"general"</span>,   <span class="tok-c">// "admin" or "general"</span>
+  <span class="tok-key">"pin"</span>: <span class="tok-str">"4821"</span>         <span class="tok-c">// optional</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"id"</span>: <span class="tok-num">3</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/users/delete</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"user"</span>: <span class="tok-num">3</span> }   <span class="tok-c">// -&gt; { "ok": true }</span></code></pre>
+      </div>
+    </div>
+
+    <h2 id="ep-enroll">Credential enrollment</h2>
+    <p class="muted">Enroll a fingerprint, card or PIN for an existing user. Fingerprint and card capture happen at
+    the lock, so your software starts enrollment and then polls for status; PIN is set in one call.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/enroll</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Begin enrollment for a user.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"type"</span>: <span class="tok-num">1</span>,       <span class="tok-c">// 1 = fingerprint, 2 = PIN, 3 = card</span>
+  <span class="tok-key">"user"</span>: <span class="tok-num">2</span>,       <span class="tok-c">// target user id</span>
+  <span class="tok-key">"pin"</span>: <span class="tok-str">"4821"</span>    <span class="tok-c">// required only for type 2 (PIN)</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"poll"</span>: <span class="tok-bool">true</span> }   <span class="tok-c">// poll:true -&gt; keep calling /api/enroll/status</span></code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/enroll/status</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Poll fingerprint/card capture progress (e.g. every 1–2 s) until <code>done</code> is true.</p>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"status"</span>: <span class="tok-num">0</span>, <span class="tok-key">"payload_len"</span>: <span class="tok-num">1</span>, <span class="tok-key">"done"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/enroll/cancel</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Abort an in-progress enrollment. Empty body. <code>-&gt; { "ok": true }</code></p>
+      </div>
+    </div>
+
+    <h2 id="ep-records">Access records</h2>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/records?days=N</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Download the lock's access log for the last <code>N</code> days (default 7). Each entry is one physical
+        unlock event.</p>
+        <div class="note warn" style="font-size:13px">App/API unlocks are not written to the lock's on-device log —
+        records cover credential unlocks (fingerprint, card, PIN) at the lock itself. Log your own API actions in
+        your software.</div>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"count"</span>: <span class="tok-num">2</span>,
+  <span class="tok-key">"records"</span>: [
+    {
+      <span class="tok-key">"user"</span>: <span class="tok-num">2</span>,
+      <span class="tok-key">"time"</span>: <span class="tok-str">"2026-11-25 09:14:02"</span>,
+      <span class="tok-key">"mode"</span>: <span class="tok-str">"fingerprint"</span>,   <span class="tok-c">// fingerprint | card | pin | other</span>
+      <span class="tok-key">"mode_byte"</span>: <span class="tok-num">1</span>,
+      <span class="tok-key">"direction"</span>: <span class="tok-num">0</span>
+    }
+  ]
+}</code></pre>
+      </div>
+    </div>
+
+    <h2 id="ep-settings">Lock settings</h2>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/settings/autolock</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Seconds before the lock re-locks after an unlock.</p>
+        <pre><code>{ <span class="tok-key">"seconds"</span>: <span class="tok-num">5</span> }   <span class="tok-c">// -&gt; { "ok": true }</span></code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/settings/normally-open</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Keep the lock open during a daily window (e.g. business hours). Minutes are from midnight; the weekday
+        mask is a bitmask of the days the window applies.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"weekday_mask"</span>: <span class="tok-num">127</span>,    <span class="tok-c">// bit0=Sun … bit6=Sat; 127 = every day</span>
+  <span class="tok-key">"start_minute"</span>: <span class="tok-num">540</span>,    <span class="tok-c">// 09:00</span>
+  <span class="tok-key">"end_minute"</span>: <span class="tok-num">1080</span>      <span class="tok-c">// 18:00</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m del">POST</span><span class="path">/api/settings/factory-reset</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Erase all users and settings on the lock and unbind it from the gateway. Irreversible — requires an
+        explicit confirmation token.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"confirm"</span>: <span class="tok-str">"RESET"</span> }   <span class="tok-c">// exact string required, else 400</span></code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <h2 id="cloud">Cloud connectivity (MQTT)</h2>
+    <p>For control from outside the LAN, the gateway can connect out to an MQTT broker you run (your VPS/cloud).
+    It publishes status and heartbeats and accepts commands — so your cloud software can reach locks without any
+    inbound port on the customer's network.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/cloud</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"enabled"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"host"</span>: <span class="tok-str">"mqtt.example.com"</span>,
+  <span class="tok-key">"port"</span>: <span class="tok-num">1883</span>,
+  <span class="tok-key">"client_id"</span>: <span class="tok-str">"gw-001"</span>,
+  <span class="tok-key">"connected"</span>: <span class="tok-bool">true</span>   <span class="tok-c">// password is never returned</span>
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/cloud</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Configure the broker. Any omitted field is left unchanged.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"enabled"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"host"</span>: <span class="tok-str">"mqtt.example.com"</span>,
+  <span class="tok-key">"port"</span>: <span class="tok-num">1883</span>,
+  <span class="tok-key">"client_id"</span>: <span class="tok-str">"gw-001"</span>,
+  <span class="tok-key">"user"</span>: <span class="tok-str">"gateway"</span>,
+  <span class="tok-key">"pass"</span>: <span class="tok-str">"••••••"</span>
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+      </div>
+    </div>
+
+    <h3>MQTT topics</h3>
+    <p class="muted"><code>&lt;id&gt;</code> is the configured <code>client_id</code> (or the device MAC if unset).</p>
+    <table>
+      <tr><th>Topic</th><th>Dir</th><th>Purpose</th></tr>
+      <tr><td><code>jenix/&lt;id&gt;/status</code></td><td>gateway &#8594; cloud</td><td>Retained online/offline status (offline via MQTT Last-Will).</td></tr>
+      <tr><td><code>jenix/&lt;id&gt;/heartbeat</code></td><td>gateway &#8594; cloud</td><td>Published every 30 s.</td></tr>
+      <tr><td><code>jenix/&lt;id&gt;/cmd</code></td><td>cloud &#8594; gateway</td><td>Command requests (status / unlock / lock / battery).</td></tr>
+      <tr><td><code>jenix/&lt;id&gt;/resp</code></td><td>gateway &#8594; cloud</td><td>Command replies.</td></tr>
+    </table>
+    <div class="note">The broker and your cloud application are yours to provide; the gateway is the MQTT client.
+    For production, run the broker over TLS.</div>
+
+    <h2 id="ota">Firmware update (OTA)</h2>
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/ota</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Update the gateway firmware by pulling a <code>.bin</code> from a URL you host (LAN or VPS). The gateway
+        downloads, flashes the application partition, and reboots on success. <b>All saved configuration (Wi-Fi,
+        API token, bound locks, cloud settings) is preserved.</b></p>
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"url"</span>: <span class="tok-str">"https://downloads.example.com/jenix-gateway-1.1.0.bin"</span> }</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"message"</span>: <span class="tok-str">"downloading firmware; the gateway will reboot on success"</span> }</code></pre>
+        <p class="muted">LAN updates are also available over standard ArduinoOTA (espota), using the API token as
+        the OTA password.</p>
+      </div>
+    </div>
+
+    <h2 id="provision">Wi-Fi provisioning</h2>
+    <p>On first power-up (or after a field reset) the gateway starts its own access point
+    <code>JenixLock-XXXX</code> at <code>192.168.4.1</code>. Open it in a browser and submit the Wi-Fi form, or
+    POST the credentials. After joining, find the gateway's IP from your router or at
+    <code>jenixlock.local</code>.</p>
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/wifi</span><span class="auth open">Setup</span></div>
+      <div class="body">
+        <p>Form-encoded (<code>application/x-www-form-urlencoded</code>), used by the setup page.</p>
+        <pre><code>ssid=MyNetwork&amp;pass=MyPassword</code></pre>
+      </div>
+    </div>
+    <div class="note">To reset a gateway in the field, press its onboard RESET button ~10 times — this clears its
+    own configuration (Wi-Fi, token, bound locks) and returns it to setup mode. It never affects the locks' data.</div>
+
+    <h2 id="notes">Integration notes</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3 style="margin-top:0">Server-side or mobile</h3>
+        <p class="muted" style="font-size:14px">Call the API from your backend, a mobile app, or an on-site
+        controller on the same Wi-Fi. These clients are not subject to browser CORS. This is the recommended
+        integration path.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Browser / web page</h3>
+        <p class="muted" style="font-size:14px">A web page in a browser calling the gateway directly is subject
+        to CORS. The gateway firmware can enable permissive CORS headers on request — ask Jenix to enable it for
+        a browser-based integration, or proxy the calls through your own server.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">One gateway, many locks</h3>
+        <p class="muted" style="font-size:14px">Scale by binding multiple locks to a gateway and selecting with
+        <code>?lock=</code>, or deploy multiple gateways. Each gateway has its own IP and token.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Reliability</h3>
+        <p class="muted" style="font-size:14px">The gateway is built for 24×7 unattended operation: software
+        watchdog, Wi-Fi auto-reconnect, brownout protection, and all state in non-volatile memory, so it recovers
+        from any reset in seconds.</p>
+      </div>
+    </div>
+
+  </main>
+</div>
+<footer>
+  <div>Jenix Lock Gateway — API &amp; Integration Guide</div>
+  <div>&copy; Jenix India. For integration support, contact your Jenix representative.</div>
+</footer>
+</body>
+</html>
