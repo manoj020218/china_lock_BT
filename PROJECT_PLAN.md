@@ -238,6 +238,73 @@ Exit criteria: failures are safe, recoverable and recorded without exposing cred
 
 Exit criteria: the client can provision, operate, recover and update the bridge using the delivered documentation.
 
+### Phase 9 Jenix Lock mobile app (custom APK UI) — Not started
+
+The "our own app" track: a modern, premium Android app (and, from the same
+codebase, a potential iOS build) that replaces the vendor HAHA app for the
+owner's locks. It can proceed in parallel with phases 6-8 once Phase 5's LAN
+API exists. It reuses the stack and the approved UX of the Jenix Smart Token
+Display app (`D:\IOT Device\que mgmt system\Smart Tken Display and Audio`).
+
+**Stack (matches the token app):**
+
+- Capacitor 7 + React 18 + TypeScript + Vite; packaged to APK via
+  `pnpm build` -> `cap sync android` -> `gradlew assembleDebug` (signed APK for
+  release). Same `pnpm` toolchain and project shape as the token app.
+- BLE on device via a Capacitor BLE plugin (e.g. `@capacitor-community/bluetooth-le`);
+  Wi-Fi/LAN via `fetch` to the ESP32 bridge REST API.
+
+**Design language (premium, matches the token app):**
+
+- **Glassmorphism**: translucent cards and bottom sheets with `backdrop-filter`
+  blur, soft inner/drop shadows, large radii, subtle gradients; dark and light
+  themes; high-contrast, accessible text.
+- **Per-button touch feedback**: port/share the token app's `feedback.ts` so
+  every button gets, from a single global listener (no per-component changes):
+  a **water-bubble ripple where the finger lands**, a **short soft generated
+  sound**, and a **short haptic vibration tuned per button kind** (`tap`,
+  `nav`, `toggleOn/Off`, `confirm`, `close`, `warn`, `success`, `error`) via
+  `@capacitor/haptics`. Silent-mode aware; sound and haptics toggleable in About.
+- Animated lock orb on the dashboard (touch-to-unlock, hold-to-lock, mirroring
+  the validated gesture), with success/error micro-animations.
+
+**Screens:**
+
+- **Devices** — list of bound locks, battery and link status, add button.
+- **Add Device** — scan by advertised name, select by lock ID, set connection
+  password (bind); **sets the lock time immediately on bind** (no-RTC rule).
+- **Lock** — big glass lock orb (touch = unlock, hold = lock), battery, last
+  activity; quick actions.
+- **Users & credentials** — add/edit users (admin/general), enroll PIN,
+  fingerprint and card with the live "present at the lock" polling flow and
+  progress UI; per-user valid-time windows.
+- **Records / Attendance** — download unlock records, filter by date/user, map
+  mode (fingerprint/card/PIN) and export CSV/JSON.
+- **Temporary password** — rolling 5-minute code (legacy KG5), copyable.
+- **Settings** — volume, auto-lock delay, normally-open schedule, remote-control
+  pairing, reboot, and factory reset (double-confirmed, audited).
+- **About** — feedback (sound/haptics) toggles, app version and update banner,
+  licenses.
+
+**Shared protocol layer:** port `client/protocol.py` to a TypeScript
+`protocol.ts` (builders/parsers, user/record/schedule encoders, auth key
+derivation) so the app, the Python client and the ESP32 firmware all speak one
+validated protocol. Unit-test it with Vitest against the same captured vectors.
+
+**Connectivity model:** primary path is the **ESP32 bridge LAN REST API**
+(Phase 5) over Wi-Fi, with token auth; optional **direct BLE** fallback from the
+phone when no bridge is present. The app never logs credentials; the connection
+password is held in secure storage.
+
+**No-RTC clock automation (required):** set time on bind and on first connect,
+and auto re-set after a battery-level recovery to ~80-90%+, so users never see a
+time mismatch — in both the direct-BLE and bridge paths.
+
+Exit criteria: a signed APK through which the owner can bind, operate, manage
+users/credentials, read attendance and configure the lock, with the premium
+glass UI and per-button bubble+haptic+sound feedback, talking to the ESP32
+bridge (and optionally direct BLE).
+
 ## Immediate next actions
 
 Phase 1 is complete. No Phase 2 lock interaction will begin until the user explicitly authorizes it.
@@ -331,6 +398,8 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 
 - Started Phase 4 on the chosen **ESP32-S3-WROOM-1 N16R8** board (CH343 USB-UART on COM39). Toolchain selected: PlatformIO + Arduino + NimBLE. Wrote, built and flashed the Stage 1 `firmware/` BLE-central ↔ USB-serial bridge; verified it boots, responds to the serial line protocol and scans (it found the lock `Lck1_8F3EE684ECE3` at RSSI -62).
 - Added a Python `SerialBridgeTransport` and a `--serial` CLI option so the desktop client drives the lock through the S3 bridge. **Live end-to-end test succeeded**: `info` (version `BK50D-V2.5`, login error 0), `battery` (100% / 5.7 V), `time` and `users` (0, consistent with the post-reset state) all ran through the bridge. The redacted login/version payload hashes matched the phone captures exactly, confirming identical key derivation. This closes the Phase 3 "run read-only commands live" item without a PC BLE adapter and establishes the Phase 4 BLE core.
+- **Proved the write path live** through the S3 bridge in one session: `set-time` (0x8A, ack 0, clock synced, tz 330 = India), `add-user` (0xA4, created user 1 `TEST1`, read back with its PIN), and `unlock` (0x88, ack 0) — the physical lock **opened** (owner-confirmed). A test user `TEST1` (id 1) remains on the lock and should be deleted at cleanup.
+- Wrote the Phase 9 plan for the owner's own **Jenix Lock app** (custom APK): Capacitor + React + TS + Vite matching the Smart Token Display app, with glassmorphism UI and that app's `feedback.ts` (water-bubble ripple + per-button haptics + soft sound), lock-specific screens, a shared `protocol.ts` ported from `client/protocol.py`, ESP32 LAN-API-first connectivity with an optional direct-BLE fallback, and the no-RTC clock automation.
 
 ## Progress update rules
 
