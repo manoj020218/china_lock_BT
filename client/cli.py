@@ -81,6 +81,14 @@ def _build_parser() -> argparse.ArgumentParser:
     al = sub.add_parser("set-auto-lock", help="[write] set auto-lock delay seconds")
     al.add_argument("--seconds", type=int, required=True)
 
+    au = sub.add_parser("add-user", help="[write] create a user (optionally with a PIN)")
+    au.add_argument("--name", required=True)
+    au.add_argument("--group", choices=["admin", "general"], default="general")
+    au.add_argument("--pin", default="")
+
+    du = sub.add_parser("delete-user", help="[write] delete a user by id")
+    du.add_argument("--user", type=int, required=True)
+
     sub.add_parser("reboot", help="[write] reboot the lock")
     return p
 
@@ -194,6 +202,17 @@ async def _run(args: argparse.Namespace) -> int:
         elif args.command == "set-auto-lock":
             await lock.set_auto_lock_delay(args.seconds)
             print(f"auto-lock delay set to {args.seconds}s (ack ok)")
+        elif args.command == "add-user":
+            uid = await lock.free_user_id()
+            group = P.UserGroup.ADMIN if args.group == "admin" else P.UserGroup.GENERAL
+            user = P.User(user_id=uid, name=args.name, group=group, pin=args.pin)
+            await lock.add_user(user)
+            if args.pin:
+                await lock.enroll_pin(uid, args.pin)
+            print(f"added user #{uid} {args.name!r} ({args.group}) (ack ok)")
+        elif args.command == "delete-user":
+            await lock.delete_user(args.user)
+            print(f"deleted user #{args.user} (ack ok)")
         elif args.command == "reboot":
             await lock.reboot()
             print("reboot sent (ack ok)")
