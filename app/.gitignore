@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.vite/
+*.local
+
+# Capacitor native build output
+android/app/build/
+android/.gradle/
+android/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# Local gateway credentials saved during manual testing
+gateways.local.json
+
+.DS_Store
+Thumbs.db

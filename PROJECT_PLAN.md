@@ -244,7 +244,38 @@ Exit criteria: failures are safe, recoverable and recorded without exposing cred
 
 Exit criteria: the client can provision, operate, recover and update the bridge using the delivered documentation.
 
-### Phase 9 Jenix Lock mobile app (custom APK UI) — Not started
+### Phase 9 Jenix Lock mobile app (custom APK UI) — In progress
+
+**Scaffolded and verified live (2026-11-25).** The app lives in `app/`
+(Capacitor 7 + React 18 + TS + Vite). It is **gateway-first**: the phone drives
+the ESP32-S3 gateway REST API over Wi-Fi, and one gateway manages several locks.
+Built so far:
+
+- Gateways: add by IP + token (tested against `/api/health` + `/api/locks`),
+  live online pill, per-gateway settings sheet (cloud MQTT, OTA, edit, remove).
+- Locks: **import a lock already bound on the gateway** (no BLE password) or
+  scan + bind a new one; stores name, time-zone and actuator user+PIN.
+- Lock screen: big glass Unlock/Lock actuators; Control (firmware/battery/clock,
+  sync-time, reboot), Users (list/add/delete + enroll finger/card/PIN with
+  polling), Records (1/7/30 days), Settings (auto-lock, factory reset, remove).
+- Glassmorphism UI + ported `feedback.ts` (water-bubble ripple + per-button
+  haptics + synthesised sound), app feedback toggles.
+- CORS handled with **no firmware change**: native `CapacitorHttp` on device, a
+  Vite dev proxy (`/__gw/<host>`) in the browser.
+
+Verified end-to-end in a browser against the live gateway (`192.168.1.217`,
+lock `8F3EE684ECE3`): gateway online, lock import, live BLE reads — firmware
+`BK50D-V2.5`, battery `100% / 5.7 V`, lock clock, user list.
+
+**Remaining for Phase 9:** add the native Android project (`cap add android`) and
+produce a signed APK; temporary-password screen (legacy KG5); per-user
+valid-time windows UI; records CSV/JSON export; optional direct-BLE fallback and
+a shared `protocol.ts` (only needed if direct-BLE is pursued — the gateway path
+needs neither).
+
+---
+
+#### Original Phase 9 design notes
 
 The "our own app" track: a modern, premium Android app (and, from the same
 codebase, a potential iOS build) that replaces the vendor HAHA app for the

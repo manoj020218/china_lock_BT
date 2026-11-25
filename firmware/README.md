@@ -128,3 +128,9 @@ Gateway capabilities, all validated on hardware:
 
 - Signed OTA images, TLS for cloud MQTT, per-user role authorization on the API,
   rate limiting, and an audit log.
+- **CORS headers (optional).** The current API sends no `Access-Control-Allow-Origin`,
+  so a desktop **browser** or PWA cannot call it cross-origin. The native app does
+  not need this (it uses Capacitor's native HTTP), and the Vite dev server proxies
+  around it. If a browser client is wanted, add `Access-Control-Allow-Origin: *`
+  (and `-Headers: Authorization, Content-Type`) to responses plus an `OPTIONS`
+  preflight handler in `rest_api.cpp`.
