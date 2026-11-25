@@ -85,9 +85,24 @@ share such logs.
 
 `bleak` drives the host machine's own Bluetooth radio. A PC without a BLE
 adapter cannot use an Android phone's Bluetooth over adb. Options: a cheap USB
-BLE dongle, a Linux SBC (e.g. Raspberry Pi) as the test host, or — once the
-ESP32-C3 exists — a thin BLE-to-serial bridge on the ESP32 driven from the PC
-(which also advances Phase 4). The scan/connect code here is adapter-agnostic.
+BLE dongle, a Linux SBC (e.g. Raspberry Pi) as the test host, or the ESP32-S3
+BLE-to-serial bridge below. The scan/connect code here is adapter-agnostic.
+
+### Driving the lock through the ESP32-S3 bridge (`--serial`)
+
+If the PC has no BLE adapter, flash the Stage 1 firmware in `firmware/` to the
+ESP32-S3 and pass `--serial <PORT>`. The client then runs the exact same
+protocol, but the ESP32-S3 is the BLE radio (connected over USB):
+
+```bash
+pip install pyserial
+python -m client.cli --serial COM39 --lock-id 8F3EE684ECE3 scan
+JENIX_LOCK_ID=8F3EE684ECE3 JENIX_LOCK_PASSWORD=... \
+  python -m client.cli --serial COM39 --verbose info
+```
+
+The `--lock-id` tells the bridge which advertised lock to connect to. This path
+is live-validated (version, login, battery, time, users).
 
 ## Tests
 

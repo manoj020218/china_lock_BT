@@ -1,5 +1,9 @@
 # Runtime dependency for BLE I/O (desktop client, Phase 3).
 bleak>=0.21
 
+# Only needed when driving the lock through the ESP32-S3 serial bridge
+# (--serial). Not required for direct-BLE use.
+pyserial>=3.5
+
 # Dev/test only (the protocol layer and its tests need neither bleak nor BLE):
 #   pytest>=7

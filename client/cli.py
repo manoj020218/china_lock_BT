@@ -44,6 +44,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="UNSAFE: log raw payloads (may contain credentials); never share such logs",
     )
     p.add_argument("--scan-timeout", type=float, default=8.0)
+    p.add_argument(
+        "--serial",
+        metavar="PORT",
+        help="drive the lock through the ESP32-S3 BLE bridge on this serial port "
+        "(e.g. COM39) instead of the PC's own BLE radio",
+    )
 
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -112,6 +118,13 @@ async def _run(args: argparse.Namespace) -> int:
         logger = FrameLogger(show_payloads=args.show_payloads)
 
     if args.command == "scan":
+        if args.serial:
+            from .serial_transport import scan_via_bridge
+            found = await asyncio.to_thread(scan_via_bridge, args.serial)
+            print(f"found {len(found)} device(s) via bridge {args.serial}:")
+            for addr, rssi, name in found:
+                print(f"  {addr}  rssi={rssi}  {name}")
+            return 0
         from .discover import scan_for_locks
         matches = await scan_for_locks(
             timeout=args.scan_timeout, rssi_threshold=args.rssi,
@@ -122,6 +135,18 @@ async def _run(args: argparse.Namespace) -> int:
             print(f"  {m.address}  {m.name}  rssi={m.rssi}")
         return 0
 
+    transport = None
+    if args.serial:
+        from .serial_transport import SerialBridgeTransport
+        lock_ref = config.lock_id or config.address
+        if not lock_ref:
+            print("error: --serial needs a --lock-id (or --address) to tell the "
+                  "bridge which lock to connect to", file=sys.stderr)
+            return 2
+        transport = SerialBridgeTransport(
+            args.serial, lock_ref, timeout=args.timeout, frame_logger=logger
+        )
+
     async with HahaLock(
         config,
         allow_write=args.allow_write,
@@ -129,6 +154,7 @@ async def _run(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         scan_timeout=args.scan_timeout,
         frame_logger=logger,
+        transport=transport,
     ) as lock:
         version = await lock.login()
 

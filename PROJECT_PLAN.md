@@ -1,7 +1,7 @@
 # HAHA Lock ESP32 LAN Bridge Project
 
-Last updated: 2026-11-24  
-Current phase: Phase 3 desktop protocol test client (Phase 2 capture complete)
+Last updated: 2026-11-25  
+Current phase: Phase 3 client live-validated via the ESP32-S3 bridge; Phase 4 firmware in progress
 Overall state: In progress
 
 ## Project objective
@@ -174,21 +174,22 @@ Exit criteria: captured request and response packets agree with the protocol spe
 - [x] Gate unlock/write/destructive operations behind `allow_write` (`--allow-write`).
 - [x] Implement BLE discovery: scan-by-name with RSSI threshold and a lock-id allowlist (`client/discover.py`, `scan` CLI command; sessions auto-resolve an address from a lock id).
 - [x] Add structured packet logging with credential redaction (`client/logging_util.py`; `--verbose` logs redacted TX/RX frames, `--show-payloads` gates raw bytes).
-- [ ] Run read-only commands against the physical lock from a BLE-capable host (PC dongle, SBC, or an ESP32 BLE-to-serial bridge — the PC alone has no BLE adapter).
+- [x] Run read-only commands against the physical lock live, through the ESP32-S3 BLE-to-serial bridge over USB (the PC has no BLE adapter): `info`, `battery`, `time`, `users` all succeeded, and admin login returned error 0. The redacted payload hashes matched the phone captures byte-for-byte, confirming identical login-key derivation.
 - [ ] Run unlock and one reversible user-management operation live.
 - [ ] Build the no-RTC clock automation (set-time on bind, battery-jump -> set-time) in the app/bridge layer above the library.
 - [ ] Implement the newer DES timestamp-challenge login path for non-v0 firmware.
 
 Exit criteria: the test client can reconnect and execute validated commands reliably without the HAHA app.
 
-### Phase 4 ESP32 BLE firmware — Not started
+### Phase 4 ESP32 BLE firmware — In progress
 
-- [ ] Select the final ESP32-C3 or ESP32-S3 board.
-- [ ] Implement BLE scan, connect, discovery and notification handling.
-- [ ] Port protocol framing and authentication.
+- [x] Select the final board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB octal PSRAM), connected via a CH343 USB-UART bridge on COM39. Toolchain: PlatformIO + Arduino + NimBLE.
+- [x] Stage 1 firmware (`firmware/`): BLE scan, connect, FFE0/FFE1 discovery and notification handling, bridged to USB serial. Built and flashed; live-verified (scan found the lock, client ran version/login/battery/time/users through it).
+- [ ] Port the full protocol framing and authentication into firmware (Stage 2; currently the PC client supplies it over the bridge).
 - [ ] Add a serialized command queue and retry policy.
-- [ ] Store lock identity and credentials securely.
+- [ ] Store lock identity and credentials securely (NVS).
 - [ ] Add watchdog, reconnect and safe failure behavior.
+- [ ] Add the no-RTC clock automation (set time on bind; auto re-set after a battery-level recovery).
 - [ ] Add signed OTA update support.
 
 Exit criteria: ESP32 performs all validated core lock commands reliably after restart and reconnect.
@@ -270,8 +271,9 @@ Public, original project artifacts:
 - `tools/btsnoop_analyzer.py` — redacting Android BTSnoop, L2CAP, ATT and HAHA frame analyzer.
 - `tests/test_protocol_codec.py` — synthetic protocol vectors and regression tests.
 - `tests/test_btsnoop_analyzer.py` — synthetic BTSnoop and pending-command correlation tests.
-- `client/` — Phase 3 desktop client package (protocol builders/parsers, auth, config, BLE transport via bleak, demand-driven session, CLI). Reference implementation for the ESP32 bridge.
-- `tests/test_client_protocol.py` — offline unit tests for the client protocol layer (30 vectors, no BLE).
+- `client/` — Phase 3 desktop client package (protocol builders/parsers, auth, config, BLE transport via bleak, ESP32-S3 serial-bridge transport, scan-by-name discovery, redacted logging, demand-driven session, CLI). Reference implementation for the ESP32 bridge.
+- `tests/test_client_protocol.py`, `tests/test_client_discovery.py` — offline unit tests for the client (41 vectors, no BLE).
+- `firmware/` — ESP32-S3 bridge firmware (PlatformIO + Arduino + NimBLE): Stage 1 BLE-central ↔ USB-serial bridge.
 
 Local-only evidence:
 
@@ -324,6 +326,11 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Opened Phase 3: scaffolded the `client/` desktop package (pure protocol builders/parsers, legacy auth, runtime config, bleak BLE transport, demand-driven session with gated writes, and a CLI). Added 30 offline unit tests that pin the builders/parsers to the captured values; all pass without BLE. Live-against-lock testing, BLE scan-by-name, redacted packet logging and the DES login path remain to do.
 - Recorded a critical hardware constraint: the lock has **no RTC**, so its clock resets on battery death/replacement. The Jenix app and ESP32 bridge must set time on bind and auto re-set it after a battery-level recovery; noted in operating constraints and the client README.
 - Added BLE **scan-by-name** discovery (name-prefix + RSSI + lock-id allowlist, with the FFE0 service as corroboration) and **redacted frame logging** (command + length + SHA-256 by default; raw payloads gated behind `--show-payloads`), plus 11 more offline tests (41 total). Noted that the PC has no BLE adapter and an Android phone cannot stand in over adb; live testing needs a USB BLE dongle, an SBC, or the forthcoming ESP32 as a BLE-to-serial bridge.
+
+### 2026-11-25
+
+- Started Phase 4 on the chosen **ESP32-S3-WROOM-1 N16R8** board (CH343 USB-UART on COM39). Toolchain selected: PlatformIO + Arduino + NimBLE. Wrote, built and flashed the Stage 1 `firmware/` BLE-central ↔ USB-serial bridge; verified it boots, responds to the serial line protocol and scans (it found the lock `Lck1_8F3EE684ECE3` at RSSI -62).
+- Added a Python `SerialBridgeTransport` and a `--serial` CLI option so the desktop client drives the lock through the S3 bridge. **Live end-to-end test succeeded**: `info` (version `BK50D-V2.5`, login error 0), `battery` (100% / 5.7 V), `time` and `users` (0, consistent with the post-reset state) all ran through the bridge. The redacted login/version payload hashes matched the phone captures exactly, confirming identical key derivation. This closes the Phase 3 "run read-only commands live" item without a PC BLE adapter and establishes the Phase 4 BLE core.
 
 ## Progress update rules
 

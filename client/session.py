@@ -42,6 +42,7 @@ class HahaLock:
         scan_timeout: float = 8.0,
         on_remote_event: Optional[Callable[[Frame], None]] = None,
         frame_logger=None,
+        transport=None,
     ) -> None:
         config.require_connectable()
         self.config = config
@@ -51,7 +52,10 @@ class HahaLock:
         self._frame_logger = frame_logger
         self._payload_size = payload_size
         self._timeout = timeout
-        self._transport: Optional[BleTransport] = None
+        # An explicit transport (e.g. the ESP32-S3 serial bridge) is used as-is;
+        # otherwise a direct BLE transport is built on connect().
+        self._provided_transport = transport
+        self._transport = None
         self._session_address = INITIAL_ADDRESS
         self._authenticated = False
 
@@ -65,6 +69,10 @@ class HahaLock:
         await self.disconnect()
 
     async def connect(self) -> None:
+        if self._provided_transport is not None:
+            self._transport = self._provided_transport
+            await self._transport.connect()
+            return
         address = self.config.address
         if not address:
             from .discover import resolve_address
