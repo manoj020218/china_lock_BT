@@ -1,246 +1,190 @@
-// Jenix lock bridge — Stage 1: BLE-central <-> USB-serial bridge.
+// Jenix lock bridge — Phase 5: Wi-Fi LAN REST API over a ported BLE lock stack.
 //
-// The ESP32-S3 connects to the lock over BLE (service FFE0, characteristic
-// FFE1) and relays raw GATT bytes to/from the PC over the USB-UART (CH343) at
-// 115200 baud. The desktop client (client/serial_transport.py) speaks this
-// line protocol and runs the full, already-validated lock protocol on top.
-//
-// Serial line protocol (newline-terminated ASCII):
-//   PC -> ESP32:
-//     PING                 -> PONG
-//     SCAN                 -> ADV <addr> <rssi> <name> (0+), then SCANDONE <n>
-//     CONNECT <id|addr>    -> CONNECTED <addr>  or  ERR <reason>
-//     TX <hex>             -> writes bytes to FFE1; notifications arrive as RX
-//     DISCONNECT           -> DISCONNECTED
-//     STATUS               -> STATUS <connected|idle> [<addr>]
-//   ESP32 -> PC (async):
-//     RX <hex>             -> one FFE1 notification payload
-//     EVT <text>           -> informational event
-//     ERR <text>           -> error
-//   Lines beginning with "# " are human-readable logs and can be ignored.
+// The ESP32-S3 connects to the lock over BLE (NimBLE), speaks the validated
+// lock protocol itself (lock_protocol / ble_lock), and exposes an authenticated
+// REST API over Wi-Fi (rest_api). A serial console configures Wi-Fi and the
+// bound lock, and can exercise lock operations directly for testing without
+// Wi-Fi. No secrets are compiled in; all config lives in NVS.
 
 #include <Arduino.h>
-#include <NimBLEDevice.h>
+#include <WiFi.h>
 
-static const uint16_t SERVICE_FFE0 = 0xFFE0;
-static const uint16_t CHAR_FFE1 = 0xFFE1;
-static const size_t WRITE_CHUNK = 20;  // safe across all lock firmware
+#include "ble_lock.h"
+#include "config.h"
+#include "rest_api.h"
 
-static NimBLEClient* g_client = nullptr;
-static NimBLERemoteCharacteristic* g_ffe1 = nullptr;
-static String g_lineBuf;
+static String g_line;
 
-// ----- small helpers ------------------------------------------------------- //
-
-static void logln(const String& s) { Serial.print("# "); Serial.println(s); }
-
-static String toHex(const uint8_t* data, size_t len) {
-  static const char* H = "0123456789abcdef";
-  String out;
-  out.reserve(len * 2);
-  for (size_t i = 0; i < len; i++) {
-    out += H[data[i] >> 4];
-    out += H[data[i] & 0x0F];
-  }
-  return out;
+static void printHelp() {
+  Serial.println(F("# commands:"));
+  Serial.println(F("#   STATUS                 - wifi + lock config + connection"));
+  Serial.println(F("#   TOKEN                  - print the REST API bearer token"));
+  Serial.println(F("#   SETWIFI <ssid> <pass>  - save wifi creds and reconnect"));
+  Serial.println(F("#   WIFI                   - reconnect wifi, print IP"));
+  Serial.println(F("#   BIND <lockid> <pw> [tz]- bind the lock (password, tz minutes)"));
+  Serial.println(F("#   CONNECT                - connect + login to the bound lock"));
+  Serial.println(F("#   DISCONNECT             - drop the BLE connection"));
+  Serial.println(F("#   VERSION|BATTERY|GETTIME- read operations"));
+  Serial.println(F("#   UNLOCK <user> <pin>    - unlock (write)"));
+  Serial.println(F("#   LOCK <user> <pin>      - lock (write)"));
+  Serial.println(F("#   REBOOT                 - reboot the lock (write)"));
 }
 
-static int hexNibble(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
-// Parse a hex string (optionally with spaces) into out[]; returns byte count or -1.
-static int parseHex(const String& s, uint8_t* out, size_t maxLen) {
-  size_t n = 0;
-  int hi = -1;
-  for (size_t i = 0; i < s.length(); i++) {
-    char c = s[i];
-    if (c == ' ' || c == '\t') continue;
-    int v = hexNibble(c);
-    if (v < 0) return -1;
-    if (hi < 0) {
-      hi = v;
-    } else {
-      if (n >= maxLen) return -1;
-      out[n++] = (uint8_t)((hi << 4) | v);
-      hi = -1;
-    }
-  }
-  if (hi >= 0) return -1;  // odd number of nibbles
-  return (int)n;
-}
-
-// ----- BLE callbacks ------------------------------------------------------- //
-
-static void notifyCB(NimBLERemoteCharacteristic* /*chr*/, uint8_t* data,
-                     size_t len, bool /*isNotify*/) {
-  Serial.print("RX ");
-  Serial.println(toHex(data, len));
-}
-
-class ClientCallbacks : public NimBLEClientCallbacks {
-  void onDisconnect(NimBLEClient* /*c*/) override {
-    g_ffe1 = nullptr;
-    Serial.println("DISCONNECTED");
-  }
-};
-static ClientCallbacks g_clientCbs;
-
-// ----- commands ------------------------------------------------------------ //
-
-static void cmdScan() {
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setActiveScan(true);
-  scan->setInterval(45);
-  scan->setWindow(15);
-  NimBLEScanResults results = scan->start(4, false);
-  int shown = 0;
-  for (int i = 0; i < results.getCount(); i++) {
-    NimBLEAdvertisedDevice d = results.getDevice(i);
-    String name = d.getName().c_str();
-    bool hasFFE0 = d.isAdvertisingService(NimBLEUUID(SERVICE_FFE0));
-    if (name.length() == 0 && !hasFFE0) continue;
-    Serial.print("ADV ");
-    Serial.print(d.getAddress().toString().c_str());
-    Serial.print(' ');
-    Serial.print(d.getRSSI());
-    Serial.print(' ');
-    Serial.println(name.length() ? name : String("(no-name)"));
-    shown++;
-  }
-  scan->clearResults();
-  Serial.print("SCANDONE ");
-  Serial.println(shown);
-}
-
-static bool matchArg(NimBLEAdvertisedDevice& d, const String& arg) {
-  String a = arg;
-  a.toLowerCase();
-  String addr = String(d.getAddress().toString().c_str());
-  addr.toLowerCase();
-  String name = String(d.getName().c_str());
-  name.toLowerCase();
-  return addr == a || (name.length() && name.indexOf(a) >= 0);
-}
-
-static void cmdConnect(const String& arg) {
-  if (arg.length() == 0) { Serial.println("ERR connect needs an id or address"); return; }
-  if (g_client && g_client->isConnected()) {
-    Serial.println("ERR already connected (DISCONNECT first)");
-    return;
-  }
-
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setActiveScan(true);
-  NimBLEScanResults results = scan->start(4, false);
-
-  NimBLEAdvertisedDevice chosen;
-  bool found = false;
-  for (int i = 0; i < results.getCount(); i++) {
-    NimBLEAdvertisedDevice d = results.getDevice(i);
-    if (matchArg(d, arg)) { chosen = d; found = true; break; }
-  }
-  scan->clearResults();
-  if (!found) { Serial.println("ERR lock not found in scan"); return; }
-
-  if (!g_client) {
-    g_client = NimBLEDevice::createClient();
-    g_client->setClientCallbacks(&g_clientCbs, false);
-    g_client->setConnectTimeout(10);
-  }
-  if (!g_client->connect(&chosen)) {
-    Serial.println("ERR BLE connect failed");
-    return;
-  }
-  NimBLERemoteService* svc = g_client->getService(NimBLEUUID(SERVICE_FFE0));
-  if (!svc) { Serial.println("ERR FFE0 service not found"); g_client->disconnect(); return; }
-  g_ffe1 = svc->getCharacteristic(NimBLEUUID(CHAR_FFE1));
-  if (!g_ffe1) { Serial.println("ERR FFE1 characteristic not found"); g_client->disconnect(); return; }
-  if (g_ffe1->canNotify()) {
-    g_ffe1->subscribe(true, notifyCB);
-  }
-  Serial.print("CONNECTED ");
-  Serial.println(chosen.getAddress().toString().c_str());
-}
-
-static void cmdTx(const String& hex) {
-  if (!g_client || !g_client->isConnected() || !g_ffe1) {
-    Serial.println("ERR not connected");
-    return;
-  }
-  static uint8_t buf[600];
-  int len = parseHex(hex, buf, sizeof(buf));
-  if (len < 0) { Serial.println("ERR bad hex"); return; }
-  for (int off = 0; off < len; off += WRITE_CHUNK) {
-    size_t n = min((size_t)WRITE_CHUNK, (size_t)(len - off));
-    if (!g_ffe1->writeValue(buf + off, n, true)) {
-      Serial.println("ERR write failed");
+static void startWifi() {
+  if (g_cfg.wifiConfigured()) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(g_cfg.wifiSsid.c_str(), g_cfg.wifiPass.c_str());
+    Serial.print(F("# wifi: connecting to "));
+    Serial.println(g_cfg.wifiSsid);
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(200);
+    if (WiFi.isConnected()) {
+      Serial.print(F("# wifi: connected, IP "));
+      Serial.println(WiFi.localIP());
       return;
     }
+    Serial.println(F("# wifi: station failed, starting SoftAP"));
   }
+  WiFi.mode(WIFI_AP);
+  uint64_t mac = ESP.getEfuseMac();
+  char ap[32];
+  snprintf(ap, sizeof(ap), "JenixLock-%04X", (uint16_t)(mac & 0xFFFF));
+  WiFi.softAP(ap);
+  Serial.print(F("# wifi: SoftAP "));
+  Serial.print(ap);
+  Serial.print(F(" IP "));
+  Serial.println(WiFi.softAPIP());
 }
 
-static void cmdDisconnect() {
-  if (g_client && g_client->isConnected()) {
-    g_client->disconnect();  // onDisconnect emits DISCONNECTED
-  } else {
-    Serial.println("DISCONNECTED");
+static bool ensure() {
+  if (!g_cfg.lockConfigured()) { Serial.println(F("# ERR lock not bound")); return false; }
+  if (!g_lock.isConnected() && !g_lock.connectTo(g_cfg.lockId)) {
+    Serial.println(F("# ERR lock not found (awake?)"));
+    return false;
   }
-}
-
-static void cmdStatus() {
-  if (g_client && g_client->isConnected()) {
-    Serial.print("STATUS connected ");
-    Serial.println(g_client->getPeerAddress().toString().c_str());
-  } else {
-    Serial.println("STATUS idle");
+  if (!g_lock.authenticated()) {
+    int e = 0;
+    if (!g_lock.login(g_cfg.lockPassword, g_cfg.lockId, e)) {
+      Serial.print(F("# ERR login error "));
+      Serial.println(e);
+      return false;
+    }
   }
+  return true;
 }
 
 static void handleLine(String line) {
   line.trim();
-  if (line.length() == 0) return;
-  int sp = line.indexOf(' ');
-  String cmd = sp < 0 ? line : line.substring(0, sp);
-  String arg = sp < 0 ? String("") : line.substring(sp + 1);
+  if (!line.length()) return;
+  int s1 = line.indexOf(' ');
+  String cmd = s1 < 0 ? line : line.substring(0, s1);
+  String rest = s1 < 0 ? "" : line.substring(s1 + 1);
   cmd.toUpperCase();
 
-  if (cmd == "PING") Serial.println("PONG");
-  else if (cmd == "SCAN") cmdScan();
-  else if (cmd == "CONNECT") cmdConnect(arg);
-  else if (cmd == "TX") cmdTx(arg);
-  else if (cmd == "DISCONNECT") cmdDisconnect();
-  else if (cmd == "STATUS") cmdStatus();
-  else Serial.println("ERR unknown command");
+  if (cmd == "HELP") { printHelp(); return; }
+  if (cmd == "STATUS") {
+    Serial.print(F("# wifi="));
+    Serial.print(WiFi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
+    Serial.print(F(" lock_bound="));
+    Serial.print(g_cfg.lockConfigured());
+    Serial.print(F(" connected="));
+    Serial.println(g_lock.isConnected());
+    return;
+  }
+  if (cmd == "TOKEN") { Serial.print(F("# token=")); Serial.println(g_cfg.apiToken); return; }
+  if (cmd == "SETWIFI") {
+    int sp = rest.indexOf(' ');
+    if (sp < 0) { Serial.println(F("# ERR usage: SETWIFI <ssid> <pass>")); return; }
+    g_cfg.wifiSsid = rest.substring(0, sp);
+    g_cfg.wifiPass = rest.substring(sp + 1);
+    g_cfg.save();
+    startWifi();
+    return;
+  }
+  if (cmd == "WIFI") { startWifi(); return; }
+  if (cmd == "BIND") {
+    int sp = rest.indexOf(' ');
+    if (sp < 0) { Serial.println(F("# ERR usage: BIND <lockid> <pw> [tz]")); return; }
+    g_cfg.lockId = rest.substring(0, sp);
+    String tail = rest.substring(sp + 1);
+    int sp2 = tail.indexOf(' ');
+    if (sp2 < 0) {
+      g_cfg.lockPassword = tail;
+    } else {
+      g_cfg.lockPassword = tail.substring(0, sp2);
+      g_cfg.tzMinutes = tail.substring(sp2 + 1).toInt();
+    }
+    g_cfg.save();
+    Serial.println(F("# OK bound"));
+    return;
+  }
+  if (cmd == "CONNECT") { Serial.println(ensure() ? F("# OK") : F("# FAIL")); return; }
+  if (cmd == "DISCONNECT") { g_lock.disconnect(); Serial.println(F("# OK")); return; }
+  if (cmd == "VERSION") {
+    if (!ensure()) return;
+    VersionInfo v;
+    if (g_lock.getVersion(v)) {
+      Serial.print(F("# version=")); Serial.print(v.firmware);
+      Serial.print(F(" cmdver=")); Serial.println(v.commandVersion);
+    } else Serial.println(F("# ERR"));
+    return;
+  }
+  if (cmd == "BATTERY") {
+    if (!ensure()) return;
+    int pct; float v;
+    if (g_lock.getBattery(pct, v)) {
+      Serial.print(F("# battery=")); Serial.print(pct);
+      Serial.print(F("% ")); Serial.print(v); Serial.println(F("V"));
+    } else Serial.println(F("# ERR"));
+    return;
+  }
+  if (cmd == "GETTIME") {
+    if (!ensure()) return;
+    struct tm t;
+    if (g_lock.getTime(t)) {
+      char buf[32]; strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &t);
+      Serial.print(F("# time=")); Serial.println(buf);
+    } else Serial.println(F("# ERR"));
+    return;
+  }
+  if (cmd == "UNLOCK" || cmd == "LOCK") {
+    if (!ensure()) return;
+    int sp = rest.indexOf(' ');
+    uint32_t user = (sp < 0 ? rest : rest.substring(0, sp)).toInt();
+    String pin = sp < 0 ? "" : rest.substring(sp + 1);
+    bool ok = (cmd == "UNLOCK") ? g_lock.unlock(user, pin) : g_lock.lockDoor(user, pin);
+    Serial.println(ok ? F("# OK") : F("# ERR"));
+    return;
+  }
+  if (cmd == "REBOOT") {
+    if (!ensure()) return;
+    Serial.println(g_lock.reboot() ? F("# OK") : F("# ERR"));
+    return;
+  }
+  Serial.println(F("# ERR unknown command (HELP)"));
 }
-
-// ----- Arduino entry points ------------------------------------------------ //
 
 void setup() {
   Serial.begin(SERIAL_BRIDGE_BAUD);
   delay(200);
-  NimBLEDevice::init("jenix-bridge");
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
-  NimBLEDevice::setMTU(247);
-  g_lineBuf.reserve(1024);
-  Serial.println("EVT jenix-bridge ready");
-  Serial.println("READY");
+  g_cfg.load();
+  g_lock.begin();
+  startWifi();
+  setupRestApi();
+  Serial.println(F("# jenix-bridge Phase 5 (REST) ready"));
+  Serial.print(F("# API token: ")); Serial.println(g_cfg.apiToken);
+  Serial.println(F("READY"));
 }
 
 void loop() {
+  handleRestApi();
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
-      if (g_lineBuf.length()) {
-        handleLine(g_lineBuf);
-        g_lineBuf = "";
-      }
+      if (g_line.length()) { handleLine(g_line); g_line = ""; }
     } else {
-      g_lineBuf += c;
-      if (g_lineBuf.length() > 2000) g_lineBuf = "";  // overflow guard
+      g_line += c;
+      if (g_line.length() > 300) g_line = "";
     }
   }
   delay(2);

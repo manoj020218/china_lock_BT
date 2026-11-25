@@ -33,9 +33,61 @@ pio run -t upload --upload-port COM39 # flash
 pio device monitor -p COM39 -b 115200 # watch logs
 ```
 
-## Stage 2 — Wi-Fi LAN REST API (next)
+## Stage 2 — Wi-Fi LAN REST API (current)
 
-Add Wi-Fi + an authenticated REST API (lock/unlock, battery, users, records,
-settings) on top of the BLE core, plus the no-RTC clock automation (set time on
-bind; auto re-set after a battery-level recovery). The BLE command layer is
-shared with Stage 1.
+The firmware now speaks the lock protocol itself (`lock_protocol` + `ble_lock`,
+ported from `client/`) and exposes an authenticated REST API over Wi-Fi
+(`rest_api`). Config lives in NVS; no secrets are compiled in. The serial
+console configures Wi-Fi and the bound lock and can exercise operations
+directly for testing.
+
+### Serial console (115200 baud)
+
+```
+STATUS                  wifi + lock config + connection
+TOKEN                   print the REST API bearer token
+SETWIFI <ssid> <pass>   save wifi creds, reconnect (station mode)
+WIFI                    reconnect wifi, print IP
+BIND <lockid> <pw> [tz] bind the lock (stored in NVS)
+CONNECT | DISCONNECT    BLE session to the bound lock
+VERSION | BATTERY | GETTIME
+UNLOCK <user> <pin> | LOCK <user> <pin> | REBOOT
+```
+
+If no Wi-Fi is configured the board starts a SoftAP `JenixLock-XXXX`
+(`192.168.4.1`); `SETWIFI` switches it to your LAN.
+
+### REST API
+
+All endpoints except `/api/health` require `Authorization: Bearer <token>`
+(printed at boot and via `TOKEN`).
+
+| Method + path | Body | Action |
+| --- | --- | --- |
+| `GET /api/health` | — | status (no auth) |
+| `POST /api/bind` | `{lock_id, password, tz_minutes?}` | bind the lock |
+| `GET /api/version` | — | firmware/version |
+| `GET /api/battery` | — | percent + voltage |
+| `GET /api/time` | — | lock clock |
+| `POST /api/time` | `{year,month,day,hour,minute,second,tz_minutes}` | set clock |
+| `POST /api/unlock` | `{user, pin}` | unlock |
+| `POST /api/lock` | `{user, pin}` | lock |
+
+Example (board on your LAN at `192.168.1.50`):
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://192.168.1.50/api/battery
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+     -d '{"user":1,"pin":"135790"}' http://192.168.1.50/api/unlock
+```
+
+Verified live over serial: BIND -> CONNECT (C++ login-key derivation, error 0)
+-> VERSION (`BK50D-V2.5`) -> BATTERY (100% / 5.8 V) -> GETTIME. The REST layer
+wraps these same proven operations; a live HTTP test needs the board on a
+reachable network (SoftAP or `SETWIFI`).
+
+## Still to do
+
+- No-RTC clock automation (set time on bind; auto re-set after a battery-level
+  recovery), users/records/settings endpoints, a serialized command queue with
+  retries, reconnect/watchdog, and signed OTA.

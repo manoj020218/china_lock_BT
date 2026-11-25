@@ -185,7 +185,7 @@ Exit criteria: the test client can reconnect and execute validated commands reli
 
 - [x] Select the final board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB octal PSRAM), connected via a CH343 USB-UART bridge on COM39. Toolchain: PlatformIO + Arduino + NimBLE.
 - [x] Stage 1 firmware (`firmware/`): BLE scan, connect, FFE0/FFE1 discovery and notification handling, bridged to USB serial. Built and flashed; live-verified (scan found the lock, client ran version/login/battery/time/users through it).
-- [ ] Port the full protocol framing and authentication into firmware (Stage 2; currently the PC client supplies it over the bridge).
+- [x] Port the full protocol framing and authentication into firmware (`firmware/src/lock_protocol.*`, `ble_lock.*`): the S3 now connects, derives the legacy login key in C++ (mbedTLS MD5) and runs commands itself — verified live over serial (CONNECT login error 0, VERSION `BK50D-V2.5`, BATTERY 100%/5.8 V, GETTIME).
 - [ ] Add a serialized command queue and retry policy.
 - [ ] Store lock identity and credentials securely (NVS).
 - [ ] Add watchdog, reconnect and safe failure behavior.
@@ -194,15 +194,16 @@ Exit criteria: the test client can reconnect and execute validated commands reli
 
 Exit criteria: ESP32 performs all validated core lock commands reliably after restart and reconnect.
 
-### Phase 5 Local LAN API — Not started
+### Phase 5 Local LAN API — In progress
 
-- [ ] Define versioned REST endpoints and response/error format.
-- [ ] Add strong API authentication and role authorization.
-- [ ] Implement lock status, battery, time and unlock endpoints.
+- [x] Define REST endpoints and a JSON response/error format (`firmware/src/rest_api.cpp`): `/api/health`, `/api/bind`, `/api/version`, `/api/battery`, `/api/time` (GET/POST), `/api/unlock`, `/api/lock`.
+- [x] Add API authentication: a per-device bearer token generated in NVS on first boot (printed at boot / via `TOKEN`); all endpoints except health require it.
+- [x] Implement lock status, battery, time and unlock endpoints over the proven BLE core; Wi-Fi station mode (via `SETWIFI`, NVS) with a SoftAP fallback. (Live HTTP test over a reachable network still pending; the underlying ops are verified over serial.)
 - [ ] Implement user and credential-management endpoints.
 - [ ] Implement records and attendance endpoints.
 - [ ] Add rate limiting and confirmation rules for destructive operations.
 - [ ] Add audit events without recording passwords or cryptographic keys.
+- [ ] Build the no-RTC clock automation (set time on bind; auto re-set after a battery-level recovery).
 
 Exit criteria: an authenticated LAN client can use every validated feature and unauthorized clients cannot operate the lock.
 
@@ -400,6 +401,8 @@ The `artifacts` directory is local-only and excluded from the public Git reposit
 - Added a Python `SerialBridgeTransport` and a `--serial` CLI option so the desktop client drives the lock through the S3 bridge. **Live end-to-end test succeeded**: `info` (version `BK50D-V2.5`, login error 0), `battery` (100% / 5.7 V), `time` and `users` (0, consistent with the post-reset state) all ran through the bridge. The redacted login/version payload hashes matched the phone captures exactly, confirming identical key derivation. This closes the Phase 3 "run read-only commands live" item without a PC BLE adapter and establishes the Phase 4 BLE core.
 - **Proved the write path live** through the S3 bridge in one session: `set-time` (0x8A, ack 0, clock synced, tz 330 = India), `add-user` (0xA4, created user 1 `TEST1`, read back with its PIN), and `unlock` (0x88, ack 0) — the physical lock **opened** (owner-confirmed). A test user `TEST1` (id 1) remains on the lock and should be deleted at cleanup.
 - Wrote the Phase 9 plan for the owner's own **Jenix Lock app** (custom APK): Capacitor + React + TS + Vite matching the Smart Token Display app, with glassmorphism UI and that app's `feedback.ts` (water-bubble ripple + per-button haptics + soft sound), lock-specific screens, a shared `protocol.ts` ported from `client/protocol.py`, ESP32 LAN-API-first connectivity with an optional direct-BLE fallback, and the no-RTC clock automation.
+- Deleted the `TEST1` write-proof user (`0xA2`, live via the bridge); the lock is clean (0 users) and re-bound with password `123456`. Added `add-user`/`delete-user` CLI commands.
+- Built **Phase 5**: ported the lock protocol + legacy auth into the ESP32-S3 firmware (C++/mbedTLS) and added an authenticated Wi-Fi REST API (`/api/health|bind|version|battery|time|unlock|lock`, bearer token in NVS, SoftAP + `SETWIFI` station mode). Flashed and verified the firmware's own stack live over serial: BIND -> CONNECT (login error 0) -> VERSION/BATTERY/GETTIME. This makes the S3 a standalone lock gateway; the REST endpoints wrap the proven ops. A live HTTP test still needs the board on a reachable LAN.
 
 ## Progress update rules
 
