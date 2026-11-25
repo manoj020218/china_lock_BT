@@ -41,8 +41,8 @@ static bool matchArg(NimBLEAdvertisedDevice& d, const String& arg) {
   return addr == a || (name.length() && name.indexOf(a) >= 0);
 }
 
-bool BleLock::connectTo(const String& ref) {
-  if (isConnected()) return true;
+int BleLock::connectTo(const String& ref) {
+  if (isConnected()) return CONN_OK;
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setActiveScan(true);
   NimBLEScanResults results = scan->start(4, false);
@@ -52,8 +52,13 @@ bool BleLock::connectTo(const String& ref) {
     NimBLEAdvertisedDevice d = results.getDevice(i);
     if (matchArg(d, ref)) { chosen = d; found = true; break; }
   }
+  if (!found) { scan->clearResults(); return CONN_NOT_FOUND; }
+
+  // Reachability: reject a lock whose advertised signal is too weak, so the
+  // caller knows the command would not reliably reach the lock.
+  _lastRssi = chosen.getRSSI();
+  if (_lastRssi < _minRssi) { scan->clearResults(); return CONN_WEAK; }
   scan->clearResults();
-  if (!found) return false;
 
   NimBLEClient* client = (NimBLEClient*)_client;
   if (!client) {
@@ -61,17 +66,17 @@ bool BleLock::connectTo(const String& ref) {
     client->setConnectTimeout(10);
     _client = client;
   }
-  if (!client->connect(&chosen)) return false;
+  if (!client->connect(&chosen)) return CONN_FAILED;
   NimBLERemoteService* svc = client->getService(NimBLEUUID(SERVICE_FFE0));
-  if (!svc) { client->disconnect(); return false; }
+  if (!svc) { client->disconnect(); return CONN_FAILED; }
   NimBLERemoteCharacteristic* ffe1 = svc->getCharacteristic(NimBLEUUID(CHAR_FFE1));
-  if (!ffe1) { client->disconnect(); return false; }
+  if (!ffe1) { client->disconnect(); return CONN_FAILED; }
   _ffe1 = ffe1;
   if (ffe1->canNotify()) ffe1->subscribe(true, notifyCB);
   _sessionAddr = lockproto::INITIAL_ADDRESS;
   _authenticated = false;
   _acc.clear();
-  return true;
+  return CONN_OK;
 }
 
 void BleLock::disconnect() {
@@ -120,7 +125,12 @@ bool BleLock::login(const String& password, const String& lockId, int& errOut) {
     _sessionAddr = resp.address;
   }
   _authenticated = true;
+  _currentLockId = lockId;
   return true;
+}
+
+bool BleLock::setTimeTo(const struct tm& t, int tzMinutes) {
+  return setTime(t, tzMinutes);
 }
 
 bool BleLock::getVersion(VersionInfo& v) {
@@ -222,4 +232,226 @@ bool BleLock::reboot() {
   lockproto::Frame resp;
   if (!command(lockproto::CMD_REBOOT, nullptr, 0, false, resp)) return false;
   return resp.error == 0;
+}
+
+// ---- discovery ------------------------------------------------------------ //
+
+bool BleLock::scanLocks(std::vector<ScanHit>& out, int durationSec) {
+  NimBLEScan* scan = NimBLEDevice::getScan();
+  scan->setActiveScan(true);
+  NimBLEScanResults results = scan->start(durationSec, false);
+  for (int i = 0; i < results.getCount(); i++) {
+    NimBLEAdvertisedDevice d = results.getDevice(i);
+    String name = String(d.getName().c_str());
+    bool ffe0 = d.isAdvertisingService(NimBLEUUID((uint16_t)0xFFE0));
+    bool nameMatch = name.startsWith("Lck") || name.startsWith("Lock") ||
+                     name.startsWith("Acc");
+    if (!nameMatch && !ffe0) continue;
+    ScanHit h;
+    h.address = String(d.getAddress().toString().c_str());
+    h.name = name;
+    h.rssi = d.getRSSI();
+    out.push_back(h);
+  }
+  scan->clearResults();
+  return true;
+}
+
+// ---- users ---------------------------------------------------------------- //
+
+static void appendBE32(std::vector<uint8_t>& v, uint32_t x) {
+  v.push_back((x >> 24) & 0xFF); v.push_back((x >> 16) & 0xFF);
+  v.push_back((x >> 8) & 0xFF); v.push_back(x & 0xFF);
+}
+
+static uint8_t hexNib(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+  return 0xF;
+}
+
+static void encodePinField(std::vector<uint8_t>& out, const String& pin) {
+  // 8 bytes of hex nibbles padded with 0xF, or all 0xFF if empty.
+  if (pin.length() == 0) { for (int i = 0; i < 8; i++) out.push_back(0xFF); return; }
+  String nib = pin;
+  while (nib.length() < 16) nib += 'F';
+  for (int i = 0; i < 16; i += 2)
+    out.push_back((hexNib(nib[i]) << 4) | hexNib(nib[i + 1]));
+}
+
+static std::vector<uint8_t> encodeUser(uint32_t id, const String& name, int group,
+                                       const String& pin) {
+  std::vector<uint8_t> u;
+  appendBE32(u, id);
+  for (int i = 0; i < 22; i++) u.push_back(i < (int)name.length() ? name[i] : 0x00);
+  u.push_back((uint8_t)group);   // 26 group
+  u.push_back(0x00);             // 27 department
+  appendBE32(u, 0xFFFFFFFF);     // 28-31 card id (unused)
+  for (int i = 0; i < 4; i++) { u.push_back(0xFF); u.push_back(0xFF); }  // 32-39 fingers
+  encodePinField(u, pin);        // 40-47 pin
+  const uint8_t sched[12] = {0x00,0x01,0x01,0x63,0x0C,0x1F,0x00,0x00,0x17,0x3B,0x7F,0x00};
+  for (int i = 0; i < 12; i++) u.push_back(sched[i]);  // 48-59 permanent schedule
+  return u;  // 60 bytes
+}
+
+bool BleLock::listUsers(std::vector<UserRec>& out) {
+  auto parse = [&](const lockproto::Frame& r) -> int {
+    const auto& p = r.payload;
+    if (p.empty()) return 0;
+    int count = p[0];
+    for (int i = 0; i < count; i++) {
+      size_t off = 1 + i * 60;
+      if (off + 60 > p.size()) break;
+      UserRec u;
+      u.id = ((uint32_t)p[off] << 24) | ((uint32_t)p[off+1] << 16) |
+             ((uint32_t)p[off+2] << 8) | p[off+3];
+      String nm;
+      for (int j = 0; j < 22; j++) { char c = p[off+4+j]; if (!c) break; nm += c; }
+      u.name = nm;
+      u.group = p[off+26];
+      bool dup = false;
+      for (auto& x : out) if (x.id == u.id) { dup = true; break; }
+      if (!dup) out.push_back(u);
+    }
+    return count;
+  };
+  uint8_t q0[5] = {0, 0, 0, 0, 0};
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_GET_USERS, q0, 5, false, r) || r.error != 0) return false;
+  int n = parse(r);
+  int guard = 0;
+  while (n > 0 && guard++ < 512) {
+    uint8_t q1[5] = {1, 0, 0, 0, 0};
+    if (!command(lockproto::CMD_GET_USERS, q1, 5, false, r) || r.error != 0) break;
+    size_t before = out.size();
+    n = parse(r);
+    if (out.size() == before) break;  // no progress
+  }
+  return true;
+}
+
+bool BleLock::addUser(const String& name, int group, const String& pin, uint32_t& newId) {
+  if (!freeUserId(newId)) return false;
+  std::vector<uint8_t> u = encodeUser(newId, name, group, pin);
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_USER, u.data(), u.size(), false, r) || r.error != 0) return false;
+  if (pin.length()) {
+    std::vector<uint8_t> e;
+    e.push_back(2);
+    appendBE32(e, newId);
+    for (size_t i = 0; i < pin.length(); i++) e.push_back((uint8_t)pin[i]);
+    command(lockproto::CMD_START_ENROLLMENT, e.data(), e.size(), false, r);
+  }
+  return true;
+}
+
+// ---- enrollment ----------------------------------------------------------- //
+
+bool BleLock::enrollStart(int type, uint32_t user, const String& pin) {
+  std::vector<uint8_t> e;
+  e.push_back((uint8_t)type);
+  appendBE32(e, user);
+  if (type == 2) for (size_t i = 0; i < pin.length(); i++) e.push_back((uint8_t)pin[i]);
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_START_ENROLLMENT, e.data(), e.size(), false, r)) return false;
+  return r.error == 0;
+}
+
+bool BleLock::enrollStatus(int& statusByte, int& payloadLen) {
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_GET_ENROLLMENT_STATUS, nullptr, 0, false, r)) return false;
+  if (r.error != 0) return false;
+  statusByte = r.payload.empty() ? -1 : r.payload[0];
+  payloadLen = r.payload.size();
+  return true;
+}
+
+bool BleLock::cancelEnroll() {
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_CANCEL_ENROLLMENT, nullptr, 0, false, r)) return false;
+  return r.error == 0;
+}
+
+// ---- records -------------------------------------------------------------- //
+
+bool BleLock::readRecords(int y0, int mo0, int d0, int y1, int mo1, int d1,
+                          std::vector<RecordRec>& out) {
+  std::vector<uint8_t> q;
+  appendBE32(q, 0);  // all-users filter
+  q.push_back((uint8_t)(y0 - 2000)); q.push_back((uint8_t)mo0); q.push_back((uint8_t)d0);
+  q.push_back((uint8_t)(y1 - 2000)); q.push_back((uint8_t)mo1); q.push_back((uint8_t)d1);
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_RECORD_COUNT, q.data(), q.size(), false, r) || r.error != 0) return false;
+  uint32_t total = r.payload.size() >= 4
+      ? (((uint32_t)r.payload[0] << 24) | ((uint32_t)r.payload[1] << 16) |
+         ((uint32_t)r.payload[2] << 8) | r.payload[3]) : 0;
+  uint32_t off = 0;
+  int guard = 0;
+  while (off < total && guard++ < 2000) {
+    std::vector<uint8_t> b;
+    appendBE32(b, off);
+    b.push_back(5);
+    if (!command(lockproto::CMD_RECORD_BATCH, b.data(), b.size(), false, r) || r.error != 0) break;
+    const auto& p = r.payload;
+    if (p.empty()) break;
+    int cnt = p[0];
+    if (cnt == 0) break;
+    for (int i = 0; i < cnt; i++) {
+      size_t e = 1 + i * 12;
+      if (e + 12 > p.size()) break;
+      RecordRec rec;
+      rec.user = ((uint32_t)p[e] << 24) | ((uint32_t)p[e+1] << 16) |
+                 ((uint32_t)p[e+2] << 8) | p[e+3];
+      char buf[32];
+      snprintf(buf, sizeof(buf), "20%02d-%02d-%02d %02d:%02d:%02d",
+               p[e+4], p[e+5], p[e+6], p[e+7], p[e+8], p[e+9]);
+      rec.time = buf;
+      rec.mode = p[e+10];
+      rec.direction = p[e+11];
+      out.push_back(rec);
+      off++;
+    }
+  }
+  return true;
+}
+
+// ---- settings ------------------------------------------------------------- //
+
+bool BleLock::getParameterRaw(int selector, std::vector<uint8_t>& out) {
+  lockproto::Frame r;
+  bool ok;
+  if (selector < 0) {
+    ok = command(lockproto::CMD_GET_PARAMETER, nullptr, 0, false, r);
+  } else {
+    uint8_t s = (uint8_t)selector;
+    ok = command(lockproto::CMD_GET_PARAMETER, &s, 1, false, r);
+  }
+  if (!ok || r.error != 0) return false;
+  out = r.payload;
+  return true;
+}
+
+bool BleLock::setAutoLock(int seconds) {
+  uint8_t p[2] = {lockproto::SELECTOR_LOCK_DELAY, (uint8_t)seconds};
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_PARAMETER, p, 2, false, r)) return false;
+  return r.error == 0;
+}
+
+bool BleLock::setNormallyOpen(int weekdayMask, int startMin, int endMin) {
+  uint32_t v = (((uint32_t)(weekdayMask & 0x7F)) << 22) |
+               (((uint32_t)(endMin & 0x7FF)) << 11) | (startMin & 0x7FF);
+  uint8_t p[5] = {lockproto::SELECTOR_LOCK_DELAY,
+                  (uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v};
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_PARAMETER, p, 5, false, r)) return false;
+  return r.error == 0;
+}
+
+bool BleLock::factoryReset() {
+  uint8_t p[2] = {0x00, 0x00};
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_PARAMETER, p, 2, false, r)) return false;
+  return r.error == 0;
 }

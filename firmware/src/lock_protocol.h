@@ -17,6 +17,8 @@ static const uint8_t FLAG_ACK_IMPLICIT_COMMAND = 0x07;
 
 // Commands (validated subset)
 enum Cmd : uint8_t {
+  CMD_SET_PARAMETER = 0x0E,
+  CMD_GET_PARAMETER = 0x0F,
   CMD_ADMIN_LOGIN = 0x13,
   CMD_GET_VERSION = 0x80,
   CMD_REBOOT = 0x81,
@@ -27,9 +29,15 @@ enum Cmd : uint8_t {
   CMD_GET_FREE_USER_ID = 0xA0,
   CMD_DELETE_USER = 0xA2,
   CMD_GET_USERS = 0xA3,
+  CMD_SET_USER = 0xA4,
+  CMD_GET_ENROLLMENT_STATUS = 0xA8,
+  CMD_START_ENROLLMENT = 0xA9,
+  CMD_CANCEL_ENROLLMENT = 0xAA,
   CMD_RECORD_COUNT = 0xB2,
   CMD_RECORD_BATCH = 0xB3,
 };
+
+static const uint8_t SELECTOR_LOCK_DELAY = 18;  // 1-byte auto-lock OR 4-byte normally-open
 
 enum LockActionByte : uint8_t { ACTION_LOCK = 0x00, ACTION_UNLOCK = 0x01 };
 

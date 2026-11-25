@@ -86,8 +86,45 @@ Verified live over serial: BIND -> CONNECT (C++ login-key derivation, error 0)
 wraps these same proven operations; a live HTTP test needs the board on a
 reachable network (SoftAP or `SETWIFI`).
 
+### Full feature set (Phase 5)
+
+Gateway capabilities, all validated on hardware:
+
+- **Multi-lock**: one gateway manages several locks. `GET /api/locks`, `GET /api/scan`
+  (discover nearby locks by name + RSSI), `POST /api/bind` / `POST /api/unbind`.
+  Operation endpoints take `?lock=<id>` (or default to the only bound lock).
+- **Operations**: `version`, `battery`, `time` (GET/POST), `unlock`, `lock`,
+  `reboot`; `users` (GET/POST add / `users/delete`); credential enrollment
+  (`enroll` + `enroll/status` + `enroll/cancel`); `records?days=N`; settings
+  (`settings/autolock`, `settings/normally-open`, `settings/factory-reset`).
+- **Reachability**: before every command the gateway checks the lock's advertised
+  RSSI; if it is below the threshold it returns a clear *"not reachable (weak
+  signal)"* error and does **not** send the command, so a caller always knows
+  whether a command actually reached the lock.
+- **No-RTC clock automation**: the gateway gets real time over **NTP** and pushes
+  it to a lock on first connect and after a battery-level recovery (locks have no
+  RTC).
+- **Cloud (optional, MQTT)**: `GET/POST /api/cloud` configures a broker
+  (`host/port/client_id/user/pass/enabled`). On connect the gateway publishes a
+  retained online status (with an LWT offline message), heartbeats every 30 s
+  (`jenix/<id>/heartbeat`), and serves commands on `jenix/<id>/cmd` with replies
+  on `.../resp`. The broker/cloud app is the client's responsibility.
+- **OTA without serial**: ArduinoOTA over LAN (espota, password = API token) and
+  `POST /api/ota {url}` to pull firmware from a URL/VPS. NVS (Wi-Fi, token,
+  locks, cloud) is preserved across updates.
+- **24x7 reliability**: a software watchdog reboots on a loop stall, Wi-Fi
+  auto-reconnects, a heap guard restarts before memory exhaustion, and the
+  brownout detector stays enabled (Wi-Fi TX power is capped to avoid false
+  brownouts on marginal supplies). All state is in NVS, so any reset recovers in
+  seconds.
+- **Factory reset in the field**: press the onboard RESET button ~10 times to
+  clear the gateway's own NVS config (fault resets like brownout/panic do not
+  count). This never touches the lock's data.
+- **Status LED (WS2812, GPIO48)**: purple blink = needs Wi-Fi setup; red blink =
+  Wi-Fi fault; blue = online (LAN); green = fully online (cloud); unlock = double
+  green flash; lock = single amber flash; error/unreachable = triple red flash.
+
 ## Still to do
 
-- No-RTC clock automation (set time on bind; auto re-set after a battery-level
-  recovery), users/records/settings endpoints, a serialized command queue with
-  retries, reconnect/watchdog, and signed OTA.
+- Signed OTA images, TLS for cloud MQTT, per-user role authorization on the API,
+  rate limiting, and an audit log.
