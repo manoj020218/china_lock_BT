@@ -2,6 +2,8 @@
 
 #include <NimBLEDevice.h>
 
+#include "radio.h"
+
 BleLock g_lock;
 
 static const uint16_t SERVICE_FFE0 = 0xFFE0;
@@ -29,7 +31,7 @@ void BleLock::onNotify(const uint8_t* data, size_t len) {
 bool BleLock::begin() {
   if (_respSem == nullptr) _respSem = xSemaphoreCreateBinary();
   NimBLEDevice::init("jenix-bridge");
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+  radioApplyBle();  // configured BLE TX power (radio.h)
   NimBLEDevice::setMTU(247);
   return true;
 }
@@ -41,11 +43,26 @@ static bool matchArg(NimBLEAdvertisedDevice& d, const String& arg) {
   return addr == a || (name.length() && name.indexOf(a) >= 0);
 }
 
+// Stops the scan as soon as the wanted lock advertises, instead of always
+// waiting the full scan window (saved ~3 s on every first connection).
+class StopOnMatch : public NimBLEAdvertisedDeviceCallbacks {
+ public:
+  String target;
+  void onResult(NimBLEAdvertisedDevice* d) override {
+    if (target.length() && matchArg(*d, target)) NimBLEDevice::getScan()->stop();
+  }
+};
+static StopOnMatch s_stopOnMatch;
+
 int BleLock::connectTo(const String& ref) {
   if (isConnected()) return CONN_OK;
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setActiveScan(true);
-  NimBLEScanResults results = scan->start(4, false);
+  s_stopOnMatch.target = ref;
+  scan->setAdvertisedDeviceCallbacks(&s_stopOnMatch, false);
+  NimBLEScanResults results = scan->start(4, false);  // returns early on a match
+  scan->setAdvertisedDeviceCallbacks(nullptr);
+  s_stopOnMatch.target = "";
   NimBLEAdvertisedDevice chosen;
   bool found = false;
   for (int i = 0; i < results.getCount(); i++) {
@@ -81,9 +98,24 @@ int BleLock::connectTo(const String& ref) {
 
 void BleLock::disconnect() {
   NimBLEClient* client = (NimBLEClient*)_client;
-  if (client && client->isConnected()) client->disconnect();
+  if (client && client->isConnected()) {
+    client->disconnect();
+    // disconnect() is asynchronous: wait until the link is really down, or the
+    // next connectTo() sees "still connected" and sends the next lock's login
+    // over the old link (first command after switching locks timed out).
+    uint32_t t0 = millis();
+    while (client->isConnected() && millis() - t0 < 3000) delay(20);
+  }
   _authenticated = false;
   _sessionAddr = lockproto::INITIAL_ADDRESS;
+}
+
+int BleLock::liveRssi() {
+  NimBLEClient* client = (NimBLEClient*)_client;
+  if (!client || !client->isConnected()) return 0;
+  int r = client->getRssi();
+  if (r < 0) _lastRssi = r;
+  return r;
 }
 
 bool BleLock::isConnected() {
@@ -105,8 +137,33 @@ bool BleLock::command(uint8_t cmd, const uint8_t* payload, size_t len, bool useI
     size_t n = min(WRITE_CHUNK, frame.size() - off);
     if (!ffe1->writeValue(frame.data() + off, n, true)) return false;
   }
-  if (xSemaphoreTake(_respSem, pdMS_TO_TICKS(timeoutMs)) != pdTRUE) return false;
-  return lockproto::decodeFrame(_respBuf.data(), _respBuf.size(), _pendingCmd, resp);
+  // The lock can push unsolicited frames (e.g. a 0x89 event after a card or
+  // fingerprint was presented). Skip anything that is not the reply to this
+  // command and keep waiting, instead of failing the command.
+  uint32_t t0 = millis();
+  for (;;) {
+    uint32_t el = millis() - t0;
+    if (el >= timeoutMs) return false;
+    if (xSemaphoreTake(_respSem, pdMS_TO_TICKS(timeoutMs - el)) != pdTRUE) return false;
+    _lastRaw = _respBuf;
+    lockproto::Frame f;
+    if (!lockproto::decodeFrame(_respBuf.data(), _respBuf.size(), _pendingCmd, f)) {
+      Serial.print(F("# ble: skipped undecodable frame ")); Serial.println(hexOf(_respBuf));
+      continue;
+    }
+    if (f.flag == lockproto::FLAG_COMMAND || (f.flag == lockproto::FLAG_ACK_WITH_COMMAND && f.command != cmd)) {
+      Serial.print(F("# ble: skipped unsolicited frame cmd 0x")); Serial.println(f.command, HEX);
+      continue;
+    }
+    resp = f;
+    return true;
+  }
+}
+
+String BleLock::hexOf(const std::vector<uint8_t>& v) {
+  String h; char b[4];
+  for (auto x : v) { snprintf(b, sizeof(b), "%02x", x); h += b; }
+  return h;
 }
 
 bool BleLock::login(const String& password, const String& lockId, int& errOut) {
@@ -127,6 +184,50 @@ bool BleLock::login(const String& password, const String& lockId, int& errOut) {
   _authenticated = true;
   _currentLockId = lockId;
   return true;
+}
+
+bool BleLock::provisionPassword(const String& password, const String& lockId,
+                                const struct tm& t, int tzMinutes, int& errOut) {
+  errOut = -1;
+  lockproto::Frame r;
+  // Mirrors the vendor app's captured onboarding sequence; all on the initial address.
+  if (!command(lockproto::CMD_GET_VERSION, nullptr, 0, true, r)) return false;
+  if (!command(lockproto::CMD_GET_VERSION, nullptr, 0, true, r)) return false;
+  if (!command(lockproto::CMD_GET_UID, nullptr, 0, true, r)) return false;
+  uint8_t tp[8];
+  tp[0] = (uint8_t)(t.tm_year - 100); tp[1] = t.tm_mon + 1; tp[2] = t.tm_mday;
+  tp[3] = t.tm_hour; tp[4] = t.tm_min; tp[5] = t.tm_sec;
+  uint16_t tz = (uint16_t)(tzMinutes & 0xFFFF);
+  tp[6] = (tz >> 8) & 0xFF; tp[7] = tz & 0xFF;
+  if (!command(lockproto::CMD_SET_TIME, tp, 8, true, r)) return false;
+  // 33 here = already provisioned with another password (safe no-op, live-validated).
+  if (r.error != 0) { errOut = r.error; return false; }
+  String key = lockproto::legacyLoginKey(password, lockId);
+  std::vector<uint8_t> kp((const uint8_t*)key.c_str(), (const uint8_t*)key.c_str() + key.length());
+  kp.push_back(0);
+  if (!command(lockproto::CMD_SET_LOGIN_KEY, kp.data(), kp.size(), true, r)) return false;
+  errOut = r.error;
+  return r.error == 0;
+}
+
+bool BleLock::updateUser(uint32_t id, const String* name, const uint8_t* sched, UserRec& out) {
+  std::vector<UserRec> users;
+  if (!listUsers(users)) return false;
+  UserRec* cur = nullptr;
+  for (auto& u : users) if (u.id == id) { cur = &u; break; }
+  if (!cur) return false;
+  uint8_t buf[60];
+  memcpy(buf, cur->raw, 60);
+  if (name) {
+    for (int i = 0; i < 22; i++) buf[4 + i] = i < (int)name->length() ? (uint8_t)(*name)[i] : 0x00;
+  }
+  if (sched) memcpy(&buf[48], sched, 12);
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_USER, buf, 60, false, r) || r.error != 0) return false;
+  users.clear();
+  if (!listUsers(users)) return false;
+  for (auto& u : users) if (u.id == id) { out = u; return true; }
+  return false;
 }
 
 bool BleLock::setTimeTo(const struct tm& t, int tzMinutes) {
@@ -310,20 +411,44 @@ bool BleLock::listUsers(std::vector<UserRec>& out) {
       for (int j = 0; j < 22; j++) { char c = p[off+4+j]; if (!c) break; nm += c; }
       u.name = nm;
       u.group = p[off+26];
+      memcpy(u.raw, &p[off], 60);
+      uint32_t card = ((uint32_t)p[off+28] << 24) | ((uint32_t)p[off+29] << 16) |
+                      ((uint32_t)p[off+30] << 8) | p[off+31];
+      u.card = card != 0xFFFFFFFF && card != 0;
+      for (int k = 0; k < 4; k++) {
+        uint16_t f = ((uint16_t)p[off+32+k*2] << 8) | p[off+33+k*2];
+        if (f != 0xFFFF) u.fingers++;
+      }
+      u.pin = p[off+40] != 0xFF && p[off+40] != 0x00;  // hex-nibble PIN padded with F
+      memcpy(u.sched, &p[off+48], 12);
       bool dup = false;
       for (auto& x : out) if (x.id == u.id) { dup = true; break; }
       if (!dup) out.push_back(u);
     }
     return count;
   };
-  uint8_t q0[5] = {0, 0, 0, 0, 0};
+  // Same request as the vendor app: getUser(0, 1) starts the enumeration,
+  // then getUser(1, 1) pages on (docs/ble_protocol.md). Value 0 worked on
+  // some lock states but a BK50D stopped answering it entirely.
+  uint8_t q0[5] = {0, 0, 0, 0, 1};
   lockproto::Frame r;
-  if (!command(lockproto::CMD_GET_USERS, q0, 5, false, r) || r.error != 0) return false;
+  lastUserError = "";
+  if (!command(lockproto::CMD_GET_USERS, q0, 5, false, r, 8000)) {
+    lastUserError = "no/garbled answer from lock (last frame " + hexOf(_lastRaw) + ")";
+    Serial.print(F("# users: ")); Serial.println(lastUserError);
+    return false;
+  }
+  if (r.error != 0) {
+    lastUserError = "lock error " + String(r.error) + ", payload " + String(r.payload.size()) + " bytes";
+    Serial.print(F("# users: ")); Serial.println(lastUserError);
+    return false;
+  }
+  Serial.print(F("# users: first page ")); Serial.print(r.payload.size()); Serial.println(F(" bytes"));
   int n = parse(r);
   int guard = 0;
   while (n > 0 && guard++ < 512) {
-    uint8_t q1[5] = {1, 0, 0, 0, 0};
-    if (!command(lockproto::CMD_GET_USERS, q1, 5, false, r) || r.error != 0) break;
+    uint8_t q1[5] = {1, 0, 0, 0, 1};
+    if (!command(lockproto::CMD_GET_USERS, q1, 5, false, r, 8000) || r.error != 0) break;
     size_t before = out.size();
     n = parse(r);
     if (out.size() == before) break;  // no progress
@@ -354,7 +479,17 @@ bool BleLock::enrollStart(int type, uint32_t user, const String& pin) {
   appendBE32(e, user);
   if (type == 2) for (size_t i = 0; i < pin.length(); i++) e.push_back((uint8_t)pin[i]);
   lockproto::Frame r;
-  if (!command(lockproto::CMD_START_ENROLLMENT, e.data(), e.size(), false, r)) return false;
+  if (!command(lockproto::CMD_START_ENROLLMENT, e.data(), e.size(), false, r)) { lastEnrollError = -1; return false; }
+  lastEnrollError = r.error;
+  return r.error == 0;
+}
+
+bool BleLock::deleteCredential(uint32_t user, int type) {
+  std::vector<uint8_t> p;
+  appendBE32(p, user);
+  p.push_back((uint8_t)type);
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_DELETE_CREDENTIAL, p.data(), p.size(), false, r)) return false;
   return r.error == 0;
 }
 
@@ -436,6 +571,13 @@ bool BleLock::setAutoLock(int seconds) {
   uint8_t p[2] = {lockproto::SELECTOR_LOCK_DELAY, (uint8_t)seconds};
   lockproto::Frame r;
   if (!command(lockproto::CMD_SET_PARAMETER, p, 2, false, r)) return false;
+  return r.error == 0;
+}
+
+bool BleLock::clearNormallyOpen() {
+  uint8_t p[5] = {lockproto::SELECTOR_LOCK_DELAY, 0xFF, 0xFF, 0xFF, 0xFF};
+  lockproto::Frame r;
+  if (!command(lockproto::CMD_SET_PARAMETER, p, 5, false, r)) return false;
   return r.error == 0;
 }
 

@@ -63,8 +63,8 @@ void ledTick() {
   uint32_t now = millis();
   if (renderEvent(now)) return;
 
-  bool apMode = (WiFi.getMode() == WIFI_AP);
   bool wifi = WiFi.isConnected();
+  bool apMode = (WiFi.getMode() & WIFI_AP) && !wifi;  // setup AP up, not on Wi-Fi
   bool cloud = cloudConnected();
   bool slow = ((now / 700) % 2) == 0;  // ~0.7s blink phase
 

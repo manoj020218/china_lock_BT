@@ -54,8 +54,41 @@ VERSION | BATTERY | GETTIME
 UNLOCK <user> <pin> | LOCK <user> <pin> | REBOOT
 ```
 
-If no Wi-Fi is configured the board starts a SoftAP `JenixLock-XXXX`
-(`192.168.4.1`); `SETWIFI` switches it to your LAN.
+### Wi-Fi provisioning + discovery (`src/provision.cpp`)
+
+If no Wi-Fi is configured the board starts a setup SoftAP `JenixLock-XXXX`
+(`192.168.4.1`, XXXX = last 2 MAC bytes). The app's **Set up new gateway**
+wizard provisions it — no IP or token typing:
+
+1. Phone joins `JenixLock-XXXX`; app reads `GET /api/health` (`setup: true`,
+   `device_id`).
+2. `GET /api/wifi/scan` lists networks; `POST /api/provision {ssid, pass}`
+   returns `{device_id, token}`. The gateway joins in AP+STA mode
+   (non-blocking) and saves the credentials **only after a successful join**.
+3. App polls `GET /api/provision/status` → `{state, ip}`
+   (`connecting|connected|failed`, with `error` on failure), then calls
+   `POST /api/provision/finish` (token) to close the AP (otherwise it closes
+   180 s after joining).
+4. Phone returns to home Wi-Fi; the app finds the gateway by `device_id`
+   (probing `/api/health` on its /24) and re-finds it the same way if DHCP
+   later changes the IP. mDNS: `jenixlock-xxxx.local`, service `_jenixlock._tcp`
+   (TXT `id=<device_id>`).
+
+Security: without a token, `/api/provision`, `/api/wifi` and `/api/wifi/scan`
+work **only while factory-fresh** (no Wi-Fi saved). Afterwards they require the
+bearer token.
+
+Factory reset: press RESET **10 times, about once per second** (each boot
+needs ~0.4 s to count a press; the count clears after 10 s without one). LED:
+white blip per counted press, amber from the 5th, rapid purple when the reset
+is accepted, then **slow purple blink = setup mode**. It clears only the
+gateway (Wi-Fi, token, bound locks) — the locks' own users/fingerprints are
+untouched. LED states: purple blink setup · red blink Wi-Fi lost · blue LAN
+online · green cloud online.
+
+Resilience: if the saved Wi-Fi can't be joined at boot, or drops for >3 min,
+the setup AP opens too and the station retries every 30 s; the AP closes
+once the station is back. `SETWIFI` still works over serial.
 
 ### REST API
 
@@ -64,14 +97,35 @@ All endpoints except `/api/health` require `Authorization: Bearer <token>`
 
 | Method + path | Body | Action |
 | --- | --- | --- |
-| `GET /api/health` | — | status (no auth) |
-| `POST /api/bind` | `{lock_id, password, tz_minutes?}` | bind the lock |
+| `GET /api/health` | — | status, `device_id`, `hostname`, `setup` (no auth) |
+| `GET /api/wifi/scan` | — | nearby Wi-Fi (setup or token) |
+| `POST /api/provision` | `{ssid, pass}` | join Wi-Fi, returns `{device_id, token}` (setup or token) |
+| `GET /api/provision/status` | — | `{state, ip?, error?}` (no auth) |
+| `POST /api/provision/finish` | — | close the setup AP |
+| `POST /api/bind` | `{lock_id, password, tz_minutes?, set_password?}` | bind; `set_password:true` sets the password on a new/reset lock (409 if already set up) |
+| `POST /api/unbind` | `{lock_id}` | remove a lock |
 | `GET /api/version` | — | firmware/version |
 | `GET /api/battery` | — | percent + voltage |
 | `GET /api/time` | — | lock clock |
 | `POST /api/time` | `{year,month,day,hour,minute,second,tz_minutes}` | set clock |
-| `POST /api/unlock` | `{user, pin}` | unlock |
-| `POST /api/lock` | `{user, pin}` | lock |
+| `POST /api/unlock` | `{user, pin}` | unlock; returns `auto_close_in` when gateway auto close is on |
+| `POST /api/lock` | `{user, pin}` | lock (cancels a pending auto close) |
+| `GET /api/users` | — | users with `fingers`, `card`, `pin`, `validity` |
+| `POST /api/users/update` | `{user, name?, validity?}` | rename / set access window (`"permanent"` or dates+times+weekdays) |
+| `GET /api/enroll/status` | — | `done` only after activity; `phase` |
+| `GET /api/records?days=N` | — | lock log + gateway log merged (`source`, `action`, `ok`) |
+| `GET /api/settings` | — | `auto_lock_s`, `app_auto_close_s`, `normally_open{…}` |
+| `POST /api/settings/autolock` | `{seconds}` | lock's own re-lock delay (3–60; needs door magnet) |
+| `POST /api/settings/app-autoclose` | `{seconds}` | gateway re-locks after app/cloud unlocks (0 = off, 3–300) |
+| `POST /api/settings/normally-open` | `{start_minute,end_minute,weekday_mask}` or `{enabled:false}` | schedule / off |
+| `GET /api/alerts`, `POST /api/alerts/check` | — | battery per lock, `low` below 25 % (checked every 6 h) |
+| `GET /api/signal?lock=` | — | live BLE RSSI + gateway Wi-Fi RSSI |
+| `GET /api/probe?lock=` | — | lock model + login protocol, no login |
+| `GET/POST /api/radio` | `{wifi_dbm, ble_dbm}` | TX power (capped at 15 dBm; brownout step-down) |
+| `GET /api/settings/raw?lock=&sel=` | — | raw lock parameters (diagnostic) |
+| `POST /api/ota/upload` | multipart `firmware`, header `X-MD5` | install firmware from the app (CORS enabled here) |
+
+Full client documentation: `docs/jenix-gateway-api.html`.
 
 Example (board on your LAN at `192.168.1.50`):
 
@@ -88,7 +142,7 @@ reachable network (SoftAP or `SETWIFI`).
 
 ### Full feature set (Phase 5)
 
-Gateway capabilities, all validated on hardware:
+Gateway capabilities (firmware 1.2.5), validated on hardware unless noted:
 
 - **Multi-lock**: one gateway manages several locks. `GET /api/locks`, `GET /api/scan`
   (discover nearby locks by name + RSSI), `POST /api/bind` / `POST /api/unbind`.
@@ -109,9 +163,30 @@ Gateway capabilities, all validated on hardware:
   retained online status (with an LWT offline message), heartbeats every 30 s
   (`jenix/<id>/heartbeat`), and serves commands on `jenix/<id>/cmd` with replies
   on `.../resp`. The broker/cloud app is the client's responsibility.
-- **OTA without serial**: ArduinoOTA over LAN (espota, password = API token) and
-  `POST /api/ota {url}` to pull firmware from a URL/VPS. NVS (Wi-Fi, token,
-  locks, cloud) is preserved across updates.
+- **Firmware updates from the app**: `src/version.h` holds `FW_VERSION`
+  (reported as `fw_version`). The app bundles the build
+  (`app/scripts/bundle-firmware.mjs`) and uploads it to `POST /api/ota/upload`;
+  the gateway checks the ESP image magic and MD5 before activating it. Also
+  ArduinoOTA over LAN (espota, password = API token) and `POST /api/ota {url}`
+  (plain http). NVS (Wi-Fi, token, locks, cloud) is preserved across updates.
+  **Release:** bump `FW_VERSION` → `pio run` → `pnpm build` in `app/`.
+- **Battery monitor** (`rest_api.cpp`): measures each bound lock 2 min after boot
+  and every 6 h, then disconnects to spare the lock battery; `/api/alerts`.
+- **Gateway auto close**: per-lock `autoCloseSec` (NVS); after an unlock via the
+  gateway it sends the lock command after that delay (retries twice). Works
+  without a door magnet; keypad/finger/card opens rely on the lock's own auto-lock.
+  *(Validated on hardware 2026-11-26: re-locked 10 s after an app unlock.)*
+- **Gateway event log** (`eventlog.cpp`): NVS ring of the last 100 lock/unlock
+  commands the gateway sent — the lock does not log app/BLE unlocks itself.
+- **Network self-check** (`netcheck.cpp`): every minute flushes the ARP table,
+  announces the gateway and probes the router (3 misses → Wi-Fi reconnect,
+  6 → restart); announces every 10 s for 2 min after each Wi-Fi join (some
+  routers black-hole a rejoined client for ~2 min otherwise).
+- **Radio power** (`radio.cpp`): Wi-Fi 8–15 dBm, BLE 0–15 dBm (default 11 / 9),
+  capped at "High" — +21 dBm BLE browned this board out even on 5 V / 2 A.
+  After a brownout reset the power steps down automatically.
+- **Faster connects**: the per-connection BLE scan stops as soon as the target
+  lock advertises (~2 s cold connect instead of 6–10 s).
 - **24x7 reliability**: a software watchdog reboots on a loop stall, Wi-Fi
   auto-reconnects, a heap guard restarts before memory exhaustion, and the
   brownout detector stays enabled (Wi-Fi TX power is capped to avoid false
@@ -128,9 +203,7 @@ Gateway capabilities, all validated on hardware:
 
 - Signed OTA images, TLS for cloud MQTT, per-user role authorization on the API,
   rate limiting, and an audit log.
-- **CORS headers (optional).** The current API sends no `Access-Control-Allow-Origin`,
-  so a desktop **browser** or PWA cannot call it cross-origin. The native app does
-  not need this (it uses Capacitor's native HTTP), and the Vite dev server proxies
-  around it. If a browser client is wanted, add `Access-Control-Allow-Origin: *`
-  (and `-Headers: Authorization, Content-Type`) to responses plus an `OPTIONS`
-  preflight handler in `rest_api.cpp`.
+- **CORS headers (optional).** Only `/api/ota/upload` sends CORS headers (the app
+  uploads firmware with XMLHttpRequest for progress). Other endpoints are called
+  through Capacitor's native HTTP and need none. For a browser/PWA client, add
+  the same `corsHeaders()` + `OPTIONS` handler to the other routes.

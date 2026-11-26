@@ -13,6 +13,8 @@ void LockConfigStore::load() {
   wifiSsid = p.getString("ssid", "");
   wifiPass = p.getString("wpass", "");
   apiToken = p.getString("token", "");
+  wifiDbm = p.getInt("wdbm", 11);
+  bleDbm = p.getInt("bdbm", 9);
   String locksJson = p.getString("locks", "[]");
   cloudEnabled = p.getBool("cen", false);
   cloudHost = p.getString("chost", "");
@@ -30,6 +32,7 @@ void LockConfigStore::load() {
       e.id = String((const char*)(o["id"] | ""));
       e.password = String((const char*)(o["pw"] | ""));
       e.tzMinutes = o["tz"] | 0;
+      e.autoCloseSec = o["ac"] | 0;
       if (e.id.length()) locks.push_back(e);
     }
   }
@@ -49,6 +52,7 @@ void LockConfigStore::save() {
     o["id"] = e.id;
     o["pw"] = e.password;
     o["tz"] = e.tzMinutes;
+    o["ac"] = e.autoCloseSec;
   }
   String locksJson;
   serializeJson(doc, locksJson);
@@ -58,6 +62,8 @@ void LockConfigStore::save() {
   p.putString("ssid", wifiSsid);
   p.putString("wpass", wifiPass);
   p.putString("token", apiToken);
+  p.putInt("wdbm", wifiDbm);
+  p.putInt("bdbm", bleDbm);
   p.putString("locks", locksJson);
   p.putBool("cen", cloudEnabled);
   p.putString("chost", cloudHost);

@@ -8,7 +8,6 @@
 
 #include <Arduino.h>
 #include <ArduinoOTA.h>
-#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <time.h>
@@ -16,7 +15,11 @@
 #include "ble_lock.h"
 #include "cloud.h"
 #include "config.h"
+#include "eventlog.h"
 #include "led.h"
+#include "provision.h"
+#include "netcheck.h"
+#include "radio.h"
 #include "rest_api.h"
 
 // 24x7 reliability: a dedicated software-watchdog task reboots the gateway if
@@ -44,48 +47,7 @@ static void watchdogTask(void*) {
 // partition and is preserved across firmware updates. The partition table
 // (default_16MB.csv) is kept stable across versions to guarantee this.
 
-volatile bool g_wifiReconnect = false;
 static String g_line;
-
-void startWifi() {
-  if (g_cfg.wifiConfigured()) {
-    WiFi.mode(WIFI_STA);
-    // Cap TX power to curb peak current (prevents brownout on marginal USB
-    // supplies). 11 dBm is ample for a LAN gateway.
-    WiFi.setTxPower(WIFI_POWER_11dBm);
-    WiFi.begin(g_cfg.wifiSsid.c_str(), g_cfg.wifiPass.c_str());
-    Serial.print(F("# wifi: connecting to "));
-    Serial.println(g_cfg.wifiSsid);
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(200);
-    if (WiFi.isConnected()) {
-      Serial.print(F("# wifi: connected, IP "));
-      Serial.println(WiFi.localIP());
-      configTime(0, 0, "pool.ntp.org", "time.google.com");  // UTC; per-lock tz applied later
-      if (MDNS.begin("jenixlock")) {
-        MDNS.addService("http", "tcp", 80);
-        Serial.println(F("# mdns: http://jenixlock.local"));
-      }
-      // LAN OTA (espota), authenticated with the API token.
-      ArduinoOTA.setHostname("jenixlock");
-      ArduinoOTA.setPassword(g_cfg.apiToken.c_str());
-      ArduinoOTA.onStart([]() { Serial.println(F("# OTA start")); });
-      ArduinoOTA.onEnd([]() { Serial.println(F("# OTA done")); });
-      ArduinoOTA.begin();
-      return;
-    }
-    Serial.println(F("# wifi: station failed, starting SoftAP"));
-  }
-  WiFi.mode(WIFI_AP);
-  uint64_t mac = ESP.getEfuseMac();
-  char ap[32];
-  snprintf(ap, sizeof(ap), "JenixLock-%04X", (uint16_t)(mac & 0xFFFF));
-  WiFi.softAP(ap);
-  Serial.print(F("# wifi: SoftAP "));
-  Serial.print(ap);
-  Serial.print(F(" IP "));
-  Serial.println(WiFi.softAPIP());
-}
 
 static void printHelp() {
   Serial.println(F("# STATUS | TOKEN | SETWIFI <ssid> <pass> | WIFI | MINRSSI <dbm>"));
@@ -130,6 +92,13 @@ static void handleLine(String line) {
   if (cmd == "STATUS") {
     Serial.print(F("# wifi="));
     Serial.print(WiFi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
+    if (WiFi.isConnected()) {
+      Serial.print(F(" ap_bssid=")); Serial.print(WiFi.BSSIDstr());
+      Serial.print(F(" ch=")); Serial.print(WiFi.channel());
+      Serial.print(F(" rssi=")); Serial.print(WiFi.RSSI());
+    }
+    Serial.print(F(" id=")); Serial.print(deviceId());
+    Serial.print(F(" ap=")); Serial.print(apActive() ? apSsid() : String("off"));
     Serial.print(F(" locks=")); Serial.print(g_cfg.locks.size());
     Serial.print(F(" connected=")); Serial.print(g_lock.isConnected());
     Serial.print(F(" minrssi=")); Serial.println(g_lock.minRssi());
@@ -143,10 +112,10 @@ static void handleLine(String line) {
     g_cfg.wifiSsid = rest.substring(0, sp);
     g_cfg.wifiPass = rest.substring(sp + 1);
     g_cfg.save();
-    startWifi();
+    wifiStart();
     return;
   }
-  if (cmd == "WIFI") { startWifi(); return; }
+  if (cmd == "WIFI") { wifiStart(); return; }
   if (cmd == "LOCKS") {
     for (auto& e : g_cfg.locks) { Serial.print(F("# lock ")); Serial.println(e.id); }
     Serial.print(F("# total ")); Serial.println(g_cfg.locks.size());
@@ -209,6 +178,7 @@ static void handleLine(String line) {
     uint32_t user = (sp < 0 ? rest : rest.substring(0, sp)).toInt();
     String pin = sp < 0 ? "" : rest.substring(sp + 1);
     bool ok = (cmd == "UNLOCK") ? g_lock.unlock(user, pin) : g_lock.lockDoor(user, pin);
+    eventLogAdd(g_lock.currentLockId(), user, cmd == "UNLOCK", ok, EV_SRC_SERIAL);
     Serial.println(ok ? F("# OK") : F("# ERR"));
     return;
   }
@@ -220,7 +190,9 @@ static void handleLine(String line) {
   Serial.println(F("# ERR unknown command (HELP)"));
 }
 
-// Factory reset by pressing the onboard RESET (EN) button ~10 times in a row.
+// Factory reset by pressing the onboard RESET (EN) button 10 times in a row,
+// about once per second (each press must let the board boot ~0.5 s, and the
+// count clears after 10 s without a press).
 // A counter in NVS increments each boot and self-clears after a stable boot, so
 // normal reboots never trigger it. This clears only the S3 config, not the lock.
 static void checkResetButton() {
@@ -235,8 +207,18 @@ static void checkResetButton() {
   sys.putInt("rc", rc);
   sys.end();
   Serial.print(F("# reset-press count: ")); Serial.println(rc);
+  // Visible feedback so the user knows each press counted: a short white
+  // blip, amber from the 5th press on.
+  if (rc >= 5) neopixelWrite(RGB_LED_PIN, 160, 70, 0);
+  else neopixelWrite(RGB_LED_PIN, 90, 90, 90);
+  delay(120);
+  neopixelWrite(RGB_LED_PIN, 0, 0, 0);
   if (rc >= 10) {
     Serial.println(F("# FACTORY RESET (10x reset button): clearing S3 config"));
+    for (int i = 0; i < 6; i++) {  // rapid purple: reset accepted
+      neopixelWrite(RGB_LED_PIN, (i % 2) ? 0 : 120, 0, (i % 2) ? 0 : 120);
+      delay(120);
+    }
     Preferences p; p.begin("jenixlock", false); p.clear(); p.end();
     Preferences s2; s2.begin("sys", false); s2.putInt("rc", 0); s2.end();
     delay(200);
@@ -251,10 +233,11 @@ void setup() {
   ledSetup();
   checkResetButton();
   g_cfg.load();
+  radioBoot();  // validate TX power; step down after a brownout
   g_lock.begin();
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
-  startWifi();
+  wifiStart();
   setupRestApi();
   cloudSetup();
 
@@ -264,7 +247,7 @@ void setup() {
   xTaskCreatePinnedToCore(watchdogTask, "wdt", 2048, nullptr,
                           configMAX_PRIORITIES - 1, nullptr, 0);
 
-  Serial.println(F("# jenix-gateway Phase 5 (multi-lock REST + cloud + OTA) ready"));
+  Serial.println(F("# jenix-gateway Phase 5 (multi-lock REST + cloud + OTA + app provisioning) ready"));
   Serial.print(F("# API token: ")); Serial.println(g_cfg.apiToken);
   Serial.println(F("READY"));
 }
@@ -272,18 +255,13 @@ void setup() {
 static void reliabilityTick() {
   // Clear the reset-press counter once the gateway has run stably for a bit.
   static bool rcCleared = false;
-  if (!rcCleared && millis() > 5000) {
+  if (!rcCleared && millis() > 10000) {
     rcCleared = true;
     Preferences s; s.begin("sys", false); s.putInt("rc", 0); s.end();
   }
   static uint32_t last = 0;
   if (millis() - last < 15000) return;
   last = millis();
-  // Wi-Fi auto-recovery (station mode only).
-  if (g_cfg.wifiConfigured() && WiFi.getMode() != WIFI_AP && !WiFi.isConnected()) {
-    Serial.println(F("# wifi dropped, reconnecting"));
-    WiFi.reconnect();
-  }
   // Heap guard: restart cleanly before memory exhaustion (config is in NVS).
   if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
     Serial.println(F("# low heap, restarting"));
@@ -294,7 +272,8 @@ static void reliabilityTick() {
 
 void loop() {
   g_loopBeat = millis();
-  if (g_wifiReconnect) { g_wifiReconnect = false; startWifi(); }
+  wifiTick();  // Wi-Fi recovery, setup AP, app provisioning
+  netcheckTick();  // LAN self-check: ARP refresh + router probe + recovery
   ArduinoOTA.handle();
   handleRestApi();
   cloudLoop();

@@ -6,6 +6,8 @@
 
 #include "ble_lock.h"
 #include "config.h"
+#include "eventlog.h"
+#include "rest_api.h"
 
 static WiFiClient net;
 static PubSubClient mqtt(net);
@@ -76,8 +78,11 @@ static void onMessage(char* /*topic*/, byte* payload, unsigned int len) {
       resp["error"] = err;
     } else if (op == "unlock") {
       resp["ok"] = g_lock.unlock(cmd["user"] | 0, strOr(cmd["pin"], ""));
+      eventLogAdd(g_lock.currentLockId(), cmd["user"] | 0, true, resp["ok"] | false, EV_SRC_CLOUD);
+      if (resp["ok"] | false) autoCloseSchedule(g_lock.currentLockId(), cmd["user"] | 0, strOr(cmd["pin"], ""));
     } else if (op == "lock") {
       resp["ok"] = g_lock.lockDoor(cmd["user"] | 0, strOr(cmd["pin"], ""));
+      eventLogAdd(g_lock.currentLockId(), cmd["user"] | 0, false, resp["ok"] | false, EV_SRC_CLOUD);
     } else if (op == "battery") {
       int p; float v;
       if (g_lock.getBattery(p, v)) { resp["ok"] = true; resp["percent"] = p; resp["voltage"] = v; }

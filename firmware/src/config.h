@@ -9,12 +9,17 @@ struct LockEntry {
   String id;
   String password;
   int tzMinutes = 0;
+  // Gateway auto close: re-lock this many seconds after an app/cloud unlock
+  // (0 = off). Works without a door magnet; set via /api/settings/app-autoclose.
+  int autoCloseSec = 0;
 };
 
 struct LockConfigStore {
   String wifiSsid;
   String wifiPass;
   String apiToken;              // bearer token for the REST API
+  int wifiDbm = 11;             // Wi-Fi TX power (see radio.h)
+  int bleDbm = 9;               // BLE TX power
   std::vector<LockEntry> locks;
 
   // Optional cloud (MQTT) link. The broker/cloud is the client's; the gateway

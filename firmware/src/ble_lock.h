@@ -33,6 +33,8 @@ class BleLock {
   bool isConnected();
 
   int lastRssi() const { return _lastRssi; }
+  // Live RSSI of the open connection (dBm), or 0 if not connected.
+  int liveRssi();
   void setMinRssi(int dbm) { _minRssi = dbm; }
   int minRssi() const { return _minRssi; }
 
@@ -43,6 +45,11 @@ class BleLock {
 
   // High-level operations. Each returns true on a success (error 0) response.
   bool login(const String& password, const String& lockId, int& errOut);
+  // Fresh/factory-reset lock: set its connection password (the "Set
+  // connection password" flow: 0x80 x2, 0x82, 0x8A set-time, 0x12 set-login-key).
+  // errOut 33 = the lock already has a different connection password.
+  bool provisionPassword(const String& password, const String& lockId, const struct tm& local,
+                         int tzMinutes, int& errOut);
   bool getVersion(VersionInfo& v);
   bool getBattery(int& pct, float& volts);
   bool getTime(struct tm& t);
@@ -57,12 +64,26 @@ class BleLock {
   bool scanLocks(std::vector<ScanHit>& out, int durationSec = 4);
 
   // Users
-  struct UserRec { uint32_t id; String name; int group; };
+  // raw = the full 60-byte structure (kept for read-modify-write updates;
+  // contains the PIN field, so never return it over the API).
+  struct UserRec {
+    uint32_t id; String name; int group;
+    int fingers = 0; bool card = false; bool pin = false;
+    uint8_t sched[12] = {0};
+    uint8_t raw[60] = {0};
+  };
+  // Rewrite a user's name and/or 12-byte validity block (0xA4), then read back.
+  bool updateUser(uint32_t id, const String* name, const uint8_t* sched, UserRec& out);
   bool listUsers(std::vector<UserRec>& out);
+  String lastUserError;  // why listUsers failed (for the API error message)
+  static String hexOf(const std::vector<uint8_t>& v);
   bool addUser(const String& name, int group, const String& pin, uint32_t& newId);
 
   // Credential enrollment (type: 1 finger, 2 pin, 3 card)
   bool enrollStart(int type, uint32_t user, const String& pin);
+  int lastEnrollError = 0;  // lock error code of the last enrollStart (-1 = no answer)
+  // Remove one credential type from a user (0xAB): 1 fingerprint, 2 PIN, 3 card.
+  bool deleteCredential(uint32_t user, int type);
   bool enrollStatus(int& statusByte, int& payloadLen);
   bool cancelEnroll();
 
@@ -75,6 +96,7 @@ class BleLock {
   bool getParameterRaw(int selector, std::vector<uint8_t>& out);
   bool setAutoLock(int seconds);
   bool setNormallyOpen(int weekdayMask, int startMin, int endMin);
+  bool clearNormallyOpen();  // writes FF FF FF FF = no normally-open schedule
   bool factoryReset();
 
   // Set the lock clock to the given broken-down time (used with NTP).
@@ -96,6 +118,7 @@ class BleLock {
   bool _authenticated = false;
   std::vector<uint8_t> _acc;
   std::vector<uint8_t> _respBuf;
+  std::vector<uint8_t> _lastRaw;  // last frame received (diagnostics)
   SemaphoreHandle_t _respSem = nullptr;
   int _lastBattery = -1;
   int _lastRssi = 0;
