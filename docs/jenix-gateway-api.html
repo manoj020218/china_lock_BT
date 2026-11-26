@@ -156,9 +156,12 @@
       <a href="#ep-enroll">Credential enrollment</a>
       <a href="#ep-records">Access records</a>
       <a href="#ep-settings">Lock settings</a>
+      <a href="#ep-alerts">Battery alerts</a>
+      <a href="#ep-diag">Signal &amp; diagnostics</a>
+      <a href="#otp">Temporary door codes</a>
       <div class="grp">Platform</div>
       <a href="#cloud">Cloud (MQTT)</a>
-      <a href="#ota">Firmware update (OTA)</a>
+      <a href="#ota">Firmware updates</a>
       <a href="#provision">Wi-Fi provisioning</a>
       <a href="#notes">Integration notes</a>
     </nav>
@@ -166,7 +169,7 @@
 
   <main>
     <header class="hero" id="overview">
-      <span class="tag">Integration Guide &middot; v1</span>
+      <span class="tag">Integration Guide &middot; v1.2 &middot; gateway firmware 1.2.14</span>
       <h1>Jenix Lock Gateway API</h1>
       <p class="lead">The Jenix Lock Gateway is a Wi-Fi bridge that lets your software control Jenix / HAHA
       Bluetooth smart locks over a simple, authenticated HTTP API. Your application talks to the gateway on the
@@ -216,7 +219,7 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <h2 id="base">Base URL &amp; authentication</h2>
     <table>
       <tr><th>Item</th><th>Value</th></tr>
-      <tr><td>Base URL</td><td><code>http://&lt;gateway-ip&gt;</code> &nbsp;(plain HTTP on the LAN; discoverable at <code>jenixlock.local</code> via mDNS)</td></tr>
+      <tr><td>Base URL</td><td><code>http://&lt;gateway-ip&gt;</code> &nbsp;(plain HTTP on the LAN; discoverable at <code>jenixlock-xxxx.local</code> via mDNS, or by probing <code>/api/health</code> for its <code>device_id</code>)</td></tr>
       <tr><td>Auth header</td><td><code>Authorization: Bearer &lt;API_TOKEN&gt;</code> on every endpoint except <code>GET /api/health</code></td></tr>
       <tr><td>Request body</td><td>JSON, with <code>Content-Type: application/json</code> on POST requests that take a body</td></tr>
       <tr><td>Response</td><td>JSON, always including a boolean <code>ok</code> field</td></tr>
@@ -224,6 +227,13 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="note warn"><b>Keep the token secret.</b> It grants full control of every lock on the gateway.
     Treat it like a password: store it server-side, never embed it in a public web page or mobile binary you
     cannot control. Rotate it by factory-resetting the gateway if it is exposed.</div>
+
+    <div class="note warn"><b>Wi-Fi extenders / repeaters.</b> Many consumer repeaters that re-broadcast the
+    router's network name block traffic between their clients and the main router's clients. If the gateway and
+    your client join different access points, requests time out although the gateway is online.
+    <code>GET /api/health</code> reports the gateway's access point (<code>wifi_bssid</code>, <code>wifi_channel</code>,
+    <code>wifi_rssi</code>) to help diagnose this. Use one router, a proper mesh system, or give the repeater its
+    own network name.</div>
 
     <h2 id="locks-select">Selecting a lock</h2>
     <p>A gateway can hold several locks, so operation endpoints need to know which one. You can specify the lock
@@ -270,10 +280,20 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
         <pre><code>{
   <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
   <span class="tok-key">"firmware"</span>: <span class="tok-str">"jenix-gateway"</span>,
-  <span class="tok-key">"wifi"</span>: <span class="tok-str">"192.168.1.217"</span>,   <span class="tok-c">// gateway IP</span>
-  <span class="tok-key">"ntp"</span>: <span class="tok-bool">true</span>,              <span class="tok-c">// clock synced</span>
-  <span class="tok-key">"locks"</span>: <span class="tok-num">1</span>,                <span class="tok-c">// bound locks</span>
-  <span class="tok-key">"lock_connected"</span>: <span class="tok-bool">false</span>   <span class="tok-c">// a BLE session is currently open</span>
+  <span class="tok-key">"fw_version"</span>: <span class="tok-str">"1.2.8"</span>,          <span class="tok-c"> // gateway firmware version</span>
+  <span class="tok-key">"build"</span>: <span class="tok-str">"Nov 26 2026 16:<span class="tok-num">30</span>:<span class="tok-num">20</span>"</span>,<span class="tok-c"> // build time of the running firmware</span>
+  <span class="tok-key">"device_id"</span>: <span class="tok-str">"D405927B3800"</span>,    <span class="tok-c"> // stable per gateway (MAC based)</span>
+  <span class="tok-key">"hostname"</span>: <span class="tok-str">"jenixlock-3800.local"</span>,
+  <span class="tok-key">"wifi"</span>: <span class="tok-str">"192.168.1.217"</span>,        <span class="tok-c"> // gateway IP</span>
+  <span class="tok-key">"wifi_bssid"</span>: <span class="tok-str">"D8:78:C9:EF:D1:79"</span>,  <span class="tok-c">// access point joined</span>
+  <span class="tok-key">"wifi_channel"</span>: <span class="tok-num">9</span>, <span class="tok-key">"wifi_rssi"</span>: <span class="tok-num">-57</span>,
+  <span class="tok-key">"setup"</span>: <span class="tok-bool">false</span>,                 <span class="tok-c"> // true = factory-fresh, waiting for Wi-Fi setup</span>
+  <span class="tok-key">"ntp"</span>: <span class="tok-bool">true</span>,                    <span class="tok-c"> // clock synced</span>
+  <span class="tok-key">"locks"</span>: <span class="tok-num">2</span>,                     <span class="tok-c"> // bound locks</span>
+  <span class="tok-key">"lock_connected"</span>: <span class="tok-bool">false</span>,        <span class="tok-c"> // a BLE session is currently open</span>
+  <span class="tok-key">"uptime_s"</span>: <span class="tok-num">3600</span>,
+  <span class="tok-key">"net_misses"</span>: <span class="tok-num">0</span>,                <span class="tok-c"> // network self-check: consecutive router misses</span>
+  <span class="tok-key">"net_recoveries"</span>: <span class="tok-num">0</span>             <span class="tok-c"> // Wi-Fi reconnects done by the self-check</span>
 }</code></pre>
       </div>
     </div>
@@ -295,13 +315,14 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="ep">
       <div class="head"><span class="m get">GET</span><span class="path">/api/scan</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Scan for Jenix/HAHA locks advertising near the gateway. Use the returned <code>name</code> as the
-        <code>lock_id</code> when binding. Takes a few seconds.</p>
+        <p>Scan for Jenix/HAHA locks advertising near the gateway (about 4 s). Locks advertise as
+        <code>Lck1_&lt;ID&gt;</code>; bind with the <b>bare ID</b> after the underscore (e.g.
+        <code>Lck1_8F3EE684ECE3</code> &rarr; <code>8F3EE684ECE3</code>) — the ID is part of the login key.</p>
         <div class="lbl">Response</div>
         <pre><code>{
   <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
   <span class="tok-key">"locks"</span>: [
-    { <span class="tok-key">"address"</span>: <span class="tok-str">"aa:bb:cc:dd:ee:ff"</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"8F3EE684ECE3"</span>, <span class="tok-key">"rssi"</span>: <span class="tok-num">-61</span> }
+    { <span class="tok-key">"address"</span>: <span class="tok-str">"aa:bb:cc:dd:ee:ff"</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Lck1_8F3EE684ECE3"</span>, <span class="tok-key">"rssi"</span>: <span class="tok-num">-61</span> }
   ]
 }</code></pre>
       </div>
@@ -314,13 +335,25 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="ep">
       <div class="head"><span class="m post">POST</span><span class="path">/api/bind</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Bind a lock to the gateway.</p>
+        <p>Bind a lock to the gateway. Two cases:</p>
+        <ul>
+          <li><b>Lock already set up</b> (has a connection password): send that password. It is the 6-digit
+          <i>connection password</i> chosen when the lock was first added — <b>not</b> a keypad PIN.</li>
+          <li><b>New or factory-reset lock</b>: add <code>"set_password": true</code> and the gateway sets your
+          chosen password on the lock itself (lock must be awake and in range).</li>
+        </ul>
         <div class="lbl">Request body</div>
         <pre><code>{
-  <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span>,   <span class="tok-c">// required</span>
-  <span class="tok-key">"password"</span>: <span class="tok-str">"123456"</span>,        <span class="tok-c">// required — the lock's BLE connection password</span>
-  <span class="tok-key">"tz_minutes"</span>: <span class="tok-num">330</span>           <span class="tok-c">// optional — minutes east of UTC (IST = 330)</span>
+  <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span>,  <span class="tok-c"> // required — bare ID (no &quot;Lck1_&quot;)</span>
+  <span class="tok-key">"password"</span>: <span class="tok-str">"123456"</span>,       <span class="tok-c"> // required — 6-digit connection password</span>
+  <span class="tok-key">"tz_minutes"</span>: <span class="tok-num">330</span>,          <span class="tok-c"> // optional — minutes east of UTC (IST = 330)</span>
+  <span class="tok-key">"set_password"</span>: <span class="tok-bool">false</span>       <span class="tok-c"> // true = new/reset lock: set this password on it</span>
 }</code></pre>
+        <div class="note" style="font-size:13px">Binding only stores the password. Call
+        <code>GET /api/version?lock=…</code> right after to prove it: <code>502 "login error 19"</code> (or 33) means
+        the password is wrong — unbind and try again. <code>"login error -1"</code> means the lock did not answer
+        (asleep): retry after touching its keypad. With <code>set_password</code>, <code>409</code> means the lock is
+        already set up and the existing password is needed.</div>
         <div class="lbl">Response</div>
         <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span> }</code></pre>
       </div>
@@ -344,11 +377,15 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="ep">
       <div class="head"><span class="m post">POST</span><span class="path">/api/unlock</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Open the lock. <code>user</code> and <code>pin</code> identify an authorised user on the lock.</p>
+        <p>Open the lock. <code>user</code> and <code>pin</code> identify an authorised user on the lock. If
+        gateway auto close is set for this lock (see <a href="#ep-settings">settings</a>), the gateway locks it again
+        after that many seconds with the same user and PIN, and reports the countdown.</p>
         <div class="lbl">Request body</div>
         <pre><code>{ <span class="tok-key">"user"</span>: <span class="tok-num">1</span>, <span class="tok-key">"pin"</span>: <span class="tok-str">"135790"</span> }</code></pre>
         <div class="lbl">Response</div>
-        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"auto_close_in"</span>: <span class="tok-num">10</span> }  <span class="tok-c"> // auto_close_in only when gateway auto close is on</span></code></pre>
+        <div class="note warn" style="font-size:13px"><code>502 "unlock rejected"</code> = the lock refused this user ID
+        + PIN combination (wrong PIN or user).</div>
       </div>
     </div>
 
@@ -367,7 +404,7 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
         <pre><code>{
   <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
   <span class="tok-key">"firmware"</span>: <span class="tok-str">"BK50D-V2.5"</span>,
-  <span class="tok-key">"command_version"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"command_version"</span>: <span class="tok-num">0</span>,   <span class="tok-c">// 0 = supported login protocol</span>
   <span class="tok-key">"admin_exists"</span>: <span class="tok-bool">true</span>
 }</code></pre>
       </div>
@@ -420,8 +457,16 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
         <pre><code>{
   <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
   <span class="tok-key">"users"</span>: [
-    { <span class="tok-key">"id"</span>: <span class="tok-num">1</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Admin"</span>, <span class="tok-key">"group"</span>: <span class="tok-str">"admin"</span> },
-    { <span class="tok-key">"id"</span>: <span class="tok-num">2</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Staff"</span>, <span class="tok-key">"group"</span>: <span class="tok-str">"general"</span> }
+    {
+      <span class="tok-key">"id"</span>: <span class="tok-num">1</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Ravi"</span>, <span class="tok-key">"group"</span>: <span class="tok-str">"general"</span>,  <span class="tok-c"> // &quot;admin&quot; | &quot;general&quot;</span>
+      <span class="tok-key">"fingers"</span>: <span class="tok-num">1</span>, <span class="tok-key">"card"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"pin"</span>: <span class="tok-bool">true</span>,      <span class="tok-c"> // enrolled credentials</span>
+      <span class="tok-key">"validity"</span>: {
+        <span class="tok-key">"permanent"</span>: <span class="tok-bool">false</span>,
+        <span class="tok-key">"start"</span>: <span class="tok-str">"2026-12-01"</span>, <span class="tok-key">"end"</span>: <span class="tok-str">"2027-03-31"</span>,
+        <span class="tok-key">"daily_start"</span>: <span class="tok-str">"09:<span class="tok-num">00</span>"</span>, <span class="tok-key">"daily_end"</span>: <span class="tok-str">"18:<span class="tok-num">00</span>"</span>,
+        <span class="tok-key">"weekdays"</span>: <span class="tok-num">62</span>                              <span class="tok-c"> // bit0=Sun … bit6=Sat (62 = Mon–Fri)</span>
+      }
+    }
   ]
 }</code></pre>
       </div>
@@ -450,6 +495,25 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
       </div>
     </div>
 
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/users/update</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Rename a user and/or set when they may enter. Send <code>name</code>, <code>validity</code> or both. Credentials (fingerprints, card, PIN) are kept. Returns the user as stored on the lock.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{
+  <span class="tok-key">"user"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"name"</span>: <span class="tok-str">"Ravi Kumar"</span>,             <span class="tok-c"> // 1–21 characters</span>
+  <span class="tok-key">"validity"</span>: {                     <span class="tok-c"> // or &quot;permanent&quot;</span>
+    <span class="tok-key">"start"</span>: <span class="tok-str">"2026-12-01"</span>, <span class="tok-key">"end"</span>: <span class="tok-str">"2027-03-31"</span>,
+    <span class="tok-key">"daily_start"</span>: <span class="tok-str">"09:<span class="tok-num">00</span>"</span>, <span class="tok-key">"daily_end"</span>: <span class="tok-str">"18:<span class="tok-num">00</span>"</span>,
+    <span class="tok-key">"weekdays"</span>: <span class="tok-num">62</span>
+  }
+}</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"user"</span>: { <span class="tok-key">"id"</span>: <span class="tok-num">1</span>, <span class="tok-key">"name"</span>: <span class="tok-str">"Ravi Kumar"</span>, <span class="tok-key">"fingers"</span>: <span class="tok-num">1</span>, <span class="tok-key">"card"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"pin"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"validity"</span>: { … } } }</code></pre>
+      </div>
+    </div>
+
     <h2 id="ep-enroll">Credential enrollment</h2>
     <p class="muted">Enroll a fingerprint, card or PIN for an existing user. Fingerprint and card capture happen at
     the lock, so your software starts enrollment and then polls for status; PIN is set in one call.</p>
@@ -466,14 +530,25 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
 }</code></pre>
         <div class="lbl">Response</div>
         <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"poll"</span>: <span class="tok-bool">true</span> }   <span class="tok-c">// poll:true -&gt; keep calling /api/enroll/status</span></code></pre>
+        <div class="note warn" style="font-size:13px"><b>PINs must be unique on a lock.</b> Setting or changing a PIN
+        to a value another user already has returns <code>409 "this PIN can't be used - please choose a different
+        PIN"</code> (lock error 26); the user keeps their current PIN. <b>Do not tell end users the reason</b> —
+        "already used by another user" would let someone discover other users' PINs by trial. Changing an existing
+        user's PIN to a new, unique value works directly with <code>type: 2</code>.</div>
       </div>
     </div>
 
     <div class="ep">
       <div class="head"><span class="m get">GET</span><span class="path">/api/enroll/status</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Poll fingerprint/card capture progress (e.g. every 1–2 s) until <code>done</code> is true.</p>
-        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"status"</span>: <span class="tok-num">0</span>, <span class="tok-key">"payload_len"</span>: <span class="tok-num">1</span>, <span class="tok-key">"done"</span>: <span class="tok-bool">true</span> }</code></pre>
+        <p>Poll fingerprint/card capture progress (e.g. every second) until <code>done</code> is true. The
+        lock reports "idle" before the person presents a finger/card too, so <code>done</code> only becomes true
+        after the lock has shown activity. Give up after ~60 s and call cancel.</p>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"status"</span>: <span class="tok-num">0</span>, <span class="tok-key">"payload_len"</span>: <span class="tok-num">1</span>,
+  <span class="tok-key">"phase"</span>: <span class="tok-str">"done"</span>,  <span class="tok-c"> // waiting | capturing | progress | waiting_card | card_read | done</span>
+  <span class="tok-key">"done"</span>: <span class="tok-bool">true</span>
+}</code></pre>
       </div>
     </div>
 
@@ -489,35 +564,62 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="ep">
       <div class="head"><span class="m get">GET</span><span class="path">/api/records?days=N</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Download the lock's access log for the last <code>N</code> days (default 7). Each entry is one physical
-        unlock event.</p>
-        <div class="note warn" style="font-size:13px">App/API unlocks are not written to the lock's on-device log —
-        records cover credential unlocks (fingerprint, card, PIN) at the lock itself. Log your own API actions in
-        your software.</div>
+        <p>Access log for the last <code>N</code> days (default 7), newest first, in the lock's local time. It
+        merges two sources: the lock's own memory (fingerprint, card and PIN opens at the keypad) and the
+        gateway's log of every lock/unlock it sent (app, cloud, auto close) — the lock itself does not record
+        those.</p>
+        <div class="note" style="font-size:13px">If the lock is asleep, the response still returns the gateway's
+        entries with <code>"lock_unreachable": true</code>.</div>
         <div class="lbl">Response</div>
         <pre><code>{
   <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
   <span class="tok-key">"count"</span>: <span class="tok-num">2</span>,
   <span class="tok-key">"records"</span>: [
-    {
-      <span class="tok-key">"user"</span>: <span class="tok-num">2</span>,
-      <span class="tok-key">"time"</span>: <span class="tok-str">"2026-11-25 09:14:02"</span>,
-      <span class="tok-key">"mode"</span>: <span class="tok-str">"fingerprint"</span>,   <span class="tok-c">// fingerprint | card | pin | other</span>
-      <span class="tok-key">"mode_byte"</span>: <span class="tok-num">1</span>,
-      <span class="tok-key">"direction"</span>: <span class="tok-num">0</span>
-    }
+    { <span class="tok-key">"user"</span>: <span class="tok-num">2</span>, <span class="tok-key">"time"</span>: <span class="tok-str">"2026-11-25 09:<span class="tok-num">14</span>:<span class="tok-num">02</span>"</span>, <span class="tok-key">"mode"</span>: <span class="tok-str">"fingerprint"</span>,
+      <span class="tok-key">"source"</span>: <span class="tok-str">"lock"</span>, <span class="tok-key">"action"</span>: <span class="tok-str">"unlock"</span>, <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"mode_byte"</span>: <span class="tok-num">1</span>, <span class="tok-key">"direction"</span>: <span class="tok-num">0</span> },
+    { <span class="tok-key">"user"</span>: <span class="tok-num">1</span>, <span class="tok-key">"time"</span>: <span class="tok-str">"2026-11-25 09:<span class="tok-num">20</span>:<span class="tok-num">40</span>"</span>, <span class="tok-key">"mode"</span>: <span class="tok-str">"app"</span>,
+      <span class="tok-key">"source"</span>: <span class="tok-str">"app"</span>, <span class="tok-key">"action"</span>: <span class="tok-str">"unlock"</span>, <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }
   ]
-}</code></pre>
+}
+// mode:   fingerprint | card | pin | other (lock)  ·  app | cloud | auto | serial (gateway)
+// action: unlock | lock     ok: <span class="tok-bool">false</span> = the lock refused the command</code></pre>
       </div>
     </div>
 
     <h2 id="ep-settings">Lock settings</h2>
 
     <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/settings</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Current lock settings: the lock's own auto-lock delay, the gateway auto close for this lock, and the normally-open schedule.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"auto_lock_s"</span>: <span class="tok-num">5</span>,         <span class="tok-c"> // lock&#x27;s own re-lock delay</span>
+  <span class="tok-key">"app_auto_close_s"</span>: <span class="tok-num">10</span>,   <span class="tok-c"> // gateway re-locks 10 s after app/cloud unlocks (0 = off)</span>
+  <span class="tok-key">"normally_open"</span>: { <span class="tok-key">"enabled"</span>: <span class="tok-bool">false</span>, <span class="tok-key">"start_minute"</span>: <span class="tok-num">0</span>, <span class="tok-key">"end_minute"</span>: <span class="tok-num">0</span>, <span class="tok-key">"weekday_mask"</span>: <span class="tok-num">0</span> }
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
       <div class="head"><span class="m post">POST</span><span class="path">/api/settings/autolock</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Seconds before the lock re-locks after an unlock.</p>
-        <pre><code>{ <span class="tok-key">"seconds"</span>: <span class="tok-num">5</span> }   <span class="tok-c">// -&gt; { "ok": true }</span></code></pre>
+        <p>The lock's own re-lock delay, 3–60 seconds. Applies to every kind of opening. Locks fitted with a
+        door sensor (magnet) re-lock only after the sensor sees the door closed — without the magnet they stay
+        open; use gateway auto close below for app openings.</p>
+        <pre><code>{ <span class="tok-key">"seconds"</span>: <span class="tok-num">5</span> }  <span class="tok-c"> // -&gt; { &quot;ok&quot;: true }</span></code></pre>
+      </div>
+    </div>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/settings/app-autoclose</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Gateway auto close: after an unlock made through the gateway (API, app, cloud) the gateway sends the lock command itself after this delay — works without a door magnet. 0 turns it off. Keypad / fingerprint / card openings do not pass through the gateway, so they rely on the lock's own auto-lock.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{ <span class="tok-key">"seconds"</span>: <span class="tok-num">10</span> }  <span class="tok-c"> // 0 = off, or 3–300</span></code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"app_auto_close_s"</span>: <span class="tok-num">10</span> }</code></pre>
       </div>
     </div>
 
@@ -525,13 +627,16 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
       <div class="head"><span class="m post">POST</span><span class="path">/api/settings/normally-open</span><span class="auth">Bearer</span></div>
       <div class="body">
         <p>Keep the lock open during a daily window (e.g. business hours). Minutes are from midnight; the weekday
-        mask is a bitmask of the days the window applies.</p>
+        mask is a bitmask of the days the window applies. Send <code>{"enabled": false}</code> to turn the schedule
+        off. While the window is active the door is <b>unlocked</b> and auto-lock does not act (press and hold
+        <b>0</b> on the keypad to lock manually).</p>
         <div class="lbl">Request body</div>
         <pre><code>{
   <span class="tok-key">"weekday_mask"</span>: <span class="tok-num">127</span>,    <span class="tok-c">// bit0=Sun … bit6=Sat; 127 = every day</span>
   <span class="tok-key">"start_minute"</span>: <span class="tok-num">540</span>,    <span class="tok-c">// 09:00</span>
   <span class="tok-key">"end_minute"</span>: <span class="tok-num">1080</span>      <span class="tok-c">// 18:00</span>
-}</code></pre>
+}
+<span class="tok-c">// turn off:</span> { <span class="tok-key">"enabled"</span>: <span class="tok-bool">false</span> }</code></pre>
         <div class="lbl">Response</div>
         <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
       </div>
@@ -548,6 +653,92 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
         <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span> }</code></pre>
       </div>
     </div>
+
+    <h2 id="ep-alerts">Battery alerts</h2>
+    <p class="muted">The gateway measures every bound lock's battery itself — 2 minutes after start-up, then every 6 hours (one short Bluetooth session per lock). Poll this from your software or app to warn users before the batteries run out.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/alerts</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Last measured battery per bound lock. <code>low</code> is true below the threshold (25&nbsp;%). <code>battery</code> is -1 until the first measurement.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{
+  <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"threshold"</span>: <span class="tok-num">25</span>,
+  <span class="tok-key">"locks"</span>: [
+    { <span class="tok-key">"lock_id"</span>: <span class="tok-str">"8F3EE684ECE3"</span>, <span class="tok-key">"battery"</span>: <span class="tok-num">18</span>, <span class="tok-key">"voltage"</span>: <span class="tok-num">4.6</span>, <span class="tok-key">"checked_at"</span>: <span class="tok-num">1795680000</span>, <span class="tok-key">"low"</span>: <span class="tok-bool">true</span> }
+  ]
+}</code></pre>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/alerts/check</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Measure every lock now (about 2–10 s per lock). Returns the same shape as <code>GET /api/alerts</code>.</p>
+        <div class="lbl">Request body</div>
+        <pre><code>{}</code></pre>
+      </div>
+    </div>
+
+    <h2 id="ep-diag">Signal &amp; diagnostics</h2>
+
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/signal?lock=…</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Live signal of the gateway&ndash;lock Bluetooth link (connects if needed; no command is sent) and the gateway&rsquo;s Wi-Fi signal. Keeping the link open uses the lock&rsquo;s battery &mdash; poll for a minute at most.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"connected"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"ble_rssi"</span>: <span class="tok-num">-58</span>, <span class="tok-key">"wifi_rssi"</span>: <span class="tok-num">-49</span>, <span class="tok-key">"min_rssi"</span>: <span class="tok-num">-92</span> }
+// &gt; -65 excellent · -65..-75 good · -75..-85 fair · below -85 weak</code></pre>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/probe?lock=…</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Read a lock&rsquo;s model and login protocol <b>without</b> logging in &mdash; useful before binding an unknown lock. <code>supported</code> is false for locks using a newer login protocol.</p>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"firmware"</span>: <span class="tok-str">"BK21F-V2.6.1"</span>, <span class="tok-key">"command_version"</span>: <span class="tok-num">0</span>, <span class="tok-key">"supported"</span>: <span class="tok-bool">true</span>,
+  <span class="tok-key">"admin_exists"</span>: <span class="tok-bool">false</span>, <span class="tok-key">"rssi"</span>: <span class="tok-num">-71</span>, <span class="tok-key">"bound_here"</span>: <span class="tok-bool">false</span> }</code></pre>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/radio</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Gateway transmit power. <code>POST</code> the same fields to change it: Wi-Fi 8/11/13/15 dBm, Bluetooth 0&ndash;15 dBm in steps of 3. Higher power needs a solid 5&nbsp;V&nbsp;/&nbsp;2&nbsp;A supply; after a power dip the gateway steps the power back down by itself (<code>stepped_down</code>).</p>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"wifi_dbm"</span>: <span class="tok-num">11</span>, <span class="tok-key">"ble_dbm"</span>: <span class="tok-num">9</span>, <span class="tok-key">"wifi_rssi"</span>: <span class="tok-num">-48</span>, <span class="tok-key">"stepped_down"</span>: <span class="tok-bool">false</span> }</code></pre>
+      </div>
+    </div>
+
+    <h2 id="otp">Temporary door codes (offline, one-time)</h2>
+    <p>A visitor can open the lock with a 6-digit code typed on the keypad. The code is computed by your software
+    (no gateway or network call); the lock computes the same value from its own clock and accepts it during the
+    current 5-minute window. The Jenix Lock app does exactly this on its Control tab.</p>
+    <div class="note danger"><b>Always use the lock's keypad ADMIN PIN to generate codes</b> &mdash; the PIN the
+    lock's admin user types on the keypad. It is <b>not</b> the 6-digit connection password used for
+    <code>/api/bind</code>, and not a general user's PIN. With any other value the codes look valid but the lock
+    rejects them. (Live-confirmed: the connection password produced a correct-looking code the lock refused; the
+    admin PIN opened it.) A lock with no admin user cannot accept temporary codes.</div>
+
+    <h3>Algorithm (KG5)</h3>
+    <ol>
+      <li>Take the <b>lock's local time</b> &mdash; current UTC plus the lock's time zone (<code>tz_minutes</code>,
+      330 for India). Do not use the phone's or server's local time zone.</li>
+      <li>Format it as <code>yyMMddHHmm</code> and round the last minute digit <b>down</b> to 0 or 5
+      (e.g. 09:07 &rarr; <code>2601150905</code>).</li>
+      <li>Append <code>000000</code> and read the 16 digits as <b>8 hex bytes</b>
+      (<code>26 01 15 09 05 00 00 00</code>).</li>
+      <li>Key = the admin PIN as ASCII, padded with spaces / cut to <b>8 characters</b>.</li>
+      <li>Encrypt the block with single <b>DES-ECB</b> using that key &rarr; 8 bytes <code>c[0..7]</code>.</li>
+      <li>Code = <code>((c[5] &amp; 0x0F) &lt;&lt; 16 | c[6] &lt;&lt; 8 | c[7]) mod 1&nbsp;000&nbsp;000</code>,
+      zero-padded to 6 digits.</li>
+    </ol>
+    <div class="lbl">Test vector</div>
+    <pre><code><span class="tok-c">// admin PIN "246810", lock local time 2026-01-15 09:07 (window 09:05-09:10)</span>
+block <span class="tok-str">2601150905000000</span>  key <span class="tok-str">"246810  "</span>  &rarr;  code <span class="tok-num">961012</span></code></pre>
+    <h3>Using a code</h3>
+    <p>Touch the keypad to wake it, press <b>*</b>, enter the 6-digit code, then press <b>#</b>. Codes are valid
+    only for their 5-minute window, so show the window (e.g. <i>"valid 09:05&ndash;09:10"</i>) when you share one.
+    The gateway keeps the lock clock on NTP time, which these codes depend on.</p>
 
     <h2 id="cloud">Cloud connectivity (MQTT)</h2>
     <p>For control from outside the LAN, the gateway can connect out to an MQTT broker you run (your VPS/cloud).
@@ -599,15 +790,29 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
     <div class="note">The broker and your cloud application are yours to provide; the gateway is the MQTT client.
     For production, run the broker over TLS.</div>
 
-    <h2 id="ota">Firmware update (OTA)</h2>
+    <h2 id="ota">Firmware updates</h2>
+    <p>Two ways to update the gateway. Either way, <b>all saved configuration (Wi-Fi, API token, bound locks, cloud settings) is preserved</b>, and <code>GET /api/health</code> reports the running <code>fw_version</code> afterwards.</p>
+
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/ota/upload</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Upload a firmware file directly (multipart form, field <code>firmware</code>) &mdash; this is how the Jenix Lock app installs the firmware bundled inside each app release. Send header <code>X-MD5</code> (hex) to have the image verified before it is activated. A wrong, partial or corrupted file is rejected and the running firmware stays in place. Requires gateway firmware 1.2.0 or newer.</p>
+        <div class="lbl">Example</div>
+        <pre><code>curl -H "Authorization: Bearer &lt;API_TOKEN&gt;" -H "X-MD5: &lt;md5-hex&gt;" \
+     -F "firmware=@jenix-gateway.bin" http://&lt;gateway-ip&gt;/api/ota/upload</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"message"</span>: <span class="tok-str">"firmware installed; the gateway restarts now"</span> }
+// then poll GET /api/health until "fw_version" shows the new version</code></pre>
+      </div>
+    </div>
     <div class="ep">
       <div class="head"><span class="m post">POST</span><span class="path">/api/ota</span><span class="auth">Bearer</span></div>
       <div class="body">
-        <p>Update the gateway firmware by pulling a <code>.bin</code> from a URL you host (LAN or VPS). The gateway
+        <p>Or let the gateway pull a <code>.bin</code> from a URL you host (LAN or VPS, <b>plain http</b>). The gateway
         downloads, flashes the application partition, and reboots on success. <b>All saved configuration (Wi-Fi,
         API token, bound locks, cloud settings) is preserved.</b></p>
         <div class="lbl">Request body</div>
-        <pre><code>{ <span class="tok-key">"url"</span>: <span class="tok-str">"https://downloads.example.com/jenix-gateway-1.1.0.bin"</span> }</code></pre>
+        <pre><code>{ <span class="tok-key">"url"</span>: <span class="tok-str">"http://downloads.example.com/jenix-gateway-1.2.5.bin"</span> }</code></pre>
         <div class="lbl">Response</div>
         <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"message"</span>: <span class="tok-str">"downloading firmware; the gateway will reboot on success"</span> }</code></pre>
         <p class="muted">LAN updates are also available over standard ArduinoOTA (espota), using the API token as
@@ -617,13 +822,48 @@ curl -X POST -H <span class="tok-str">"Authorization: Bearer &lt;API_TOKEN&gt;"<
 
     <h2 id="provision">Wi-Fi provisioning</h2>
     <p>On first power-up (or after a field reset) the gateway starts its own access point
-    <code>JenixLock-XXXX</code> at <code>192.168.4.1</code>. Open it in a browser and submit the Wi-Fi form, or
-    POST the credentials. After joining, find the gateway's IP from your router or at
-    <code>jenixlock.local</code>.</p>
+    <code>JenixLock-XXXX</code> at <code>192.168.4.1</code>. A client joined to it provisions the home Wi-Fi with
+    the calls below; no token is needed while the gateway is factory-fresh (<code>/api/health</code> returns
+    <code>"setup": true</code>), and the reply carries the gateway's API token. Once Wi-Fi is saved, these calls
+    require the bearer token.</p>
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/wifi/scan</span><span class="auth open">Setup</span></div>
+      <div class="body">
+        <p>Nearby Wi-Fi networks, strongest first (2.4 GHz only).</p>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"networks"</span>: [ { <span class="tok-key">"ssid"</span>: <span class="tok-str">"MyNetwork"</span>, <span class="tok-key">"rssi"</span>: -52, <span class="tok-key">"secure"</span>: <span class="tok-bool">true</span> } ] }</code></pre>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/provision</span><span class="auth open">Setup</span></div>
+      <div class="body">
+        <pre><code>{ <span class="tok-key">"ssid"</span>: <span class="tok-str">"MyNetwork"</span>, <span class="tok-key">"pass"</span>: <span class="tok-str">"MyPassword"</span> }</code></pre>
+        <div class="lbl">Response</div>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"device_id"</span>: <span class="tok-str">"&lt;12 hex&gt;"</span>, <span class="tok-key">"token"</span>: <span class="tok-str">"&lt;api-token&gt;"</span>, <span class="tok-key">"hostname"</span>: <span class="tok-str">"jenixlock-xxxx.local"</span> }</code></pre>
+        <p class="muted">The gateway joins the network while keeping its access point up, and saves the credentials only
+        if the join succeeds.</p>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m get">GET</span><span class="path">/api/provision/status</span><span class="auth open">Open</span></div>
+      <div class="body">
+        <p>Poll every 1–2 s. <code>state</code> is <code>connecting</code>, <code>connected</code> (with the new LAN
+        <code>ip</code>) or <code>failed</code> (with <code>error</code>).</p>
+        <pre><code>{ <span class="tok-key">"ok"</span>: <span class="tok-bool">true</span>, <span class="tok-key">"state"</span>: <span class="tok-str">"connected"</span>, <span class="tok-key">"ip"</span>: <span class="tok-str">"192.168.1.50"</span>, <span class="tok-key">"device_id"</span>: <span class="tok-str">"&lt;12 hex&gt;"</span> }</code></pre>
+      </div>
+    </div>
+    <div class="ep">
+      <div class="head"><span class="m post">POST</span><span class="path">/api/provision/finish</span><span class="auth">Bearer</span></div>
+      <div class="body">
+        <p>Closes the setup access point (it otherwise closes 3 minutes after joining). Then reconnect the client to
+        the home Wi-Fi and reach the gateway at the reported IP. If the IP later changes, find the gateway again by
+        probing <code>GET /api/health</code> on the subnet for the same <code>device_id</code>.</p>
+      </div>
+    </div>
     <div class="ep">
       <div class="head"><span class="m post">POST</span><span class="path">/api/wifi</span><span class="auth open">Setup</span></div>
       <div class="body">
-        <p>Form-encoded (<code>application/x-www-form-urlencoded</code>), used by the setup page.</p>
+        <p>Browser fallback: form-encoded (<code>application/x-www-form-urlencoded</code>), used by the setup page at
+        <code>http://192.168.4.1/</code>.</p>
         <pre><code>ssid=MyNetwork&amp;pass=MyPassword</code></pre>
       </div>
     </div>
