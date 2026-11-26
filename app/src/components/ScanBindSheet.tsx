@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, type LockEntryDto, type ScanHitDto } from "../services/api";
 import { locks, type Gateway, type SavedLock } from "../services/store";
+import { SecretInput, TIME_ZONES } from "./SecretInput";
+import { UserPicker } from "./UserBits";
 import { Sheet, Spinner } from "./Sheet";
 import { useToast } from "./Toast";
 
@@ -25,7 +27,15 @@ export function ScanBindSheet({ gw, onClose, onBound }: { gw: Gateway; onClose: 
   const [password, setPassword] = useState("");
   const [user, setUser] = useState("1");
   const [pin, setPin] = useState("");
-  const [tz, setTz] = useState(String(-new Date().getTimezoneOffset()));
+  // Bind: is this a NEW / reset lock (we choose its connection password) or
+  // one that already has a connection password?
+  const [fresh, setFresh] = useState(true);
+  const [password2, setPassword2] = useState("");
+  // Step 2 after connecting: which lock user the app opens the door as.
+  const [step, setStep] = useState<"connect" | "user">("connect");
+  const [boundId, setBoundId] = useState("");
+  // Default India (IST); the gateway applies this offset when it sets the lock clock.
+  const [tz, setTz] = useState("330");
   const [busy, setBusy] = useState(false);
 
   // Load locks already bound on the gateway (not yet saved in the app).
@@ -62,8 +72,10 @@ export function ScanBindSheet({ gw, onClose, onBound }: { gw: Gateway; onClose: 
   }
   function bindScanned(h: ScanHitDto) {
     setSel({ id: h.address, mode: "bind" });
-    setLockId(h.name || "");
-    setName(h.name || "Lock");
+    // The login key is MD5(password + lockId) with the BARE id, not the
+    // advertised name ("Lck1_8F3EE684ECE3" -> "8F3EE684ECE3").
+    setLockId(bareLockId(h.name || ""));
+    setName(h.name ? `Lock ${bareLockId(h.name).slice(-4)}` : "Lock");
   }
   function bindManual() {
     setSel({ id: "manual", mode: "bind" });
@@ -71,42 +83,117 @@ export function ScanBindSheet({ gw, onClose, onBound }: { gw: Gateway; onClose: 
     setName("Lock");
   }
 
-  async function save() {
-    const id = lockId.trim();
+  async function connect() {
+    const id = bareLockId(lockId);
     if (!id) {
       toast("Enter the lock ID.", "err");
       return;
+    }
+    if (sel?.mode === "bind") {
+      if (!/^\d{6}$/.test(password)) {
+        toast("Connection password must be 6 digits.", "err");
+        return;
+      }
+      if (fresh && password !== password2) {
+        toast("The two passwords don't match.", "err");
+        return;
+      }
     }
     const tzMinutes = parseInt(tz, 10) || 0;
     setBusy(true);
     try {
       if (sel?.mode === "bind") {
-        if (!password.trim()) {
-          toast("Enter the lock BLE password.", "err");
+        await api.bind(gw, id, password, tzMinutes, fresh);
+        // Prove the password with a real login before saving anything. The
+        // first login after connecting can time out (error -1) even when the
+        // password is wrong, so retry; only a successful login counts.
+        let verdict: "ok" | "wrong" | "noanswer" = "noanswer";
+        for (let attempt = 0; attempt < 3 && verdict === "noanswer"; attempt++) {
+          try {
+            await api.version(gw, id);
+            verdict = "ok";
+          } catch (err) {
+            const msg = err instanceof ApiError ? err.message : "";
+            if (/login error (19|33)(?!\d)/.test(msg)) verdict = "wrong";
+            else await new Promise((r) => setTimeout(r, 1500));
+          }
+        }
+        if (verdict !== "ok") {
+          await api.unbind(gw, id).catch(() => undefined);
+          toast(
+            verdict === "wrong"
+              ? fresh
+                ? "The lock refused the new password — it may already be set up. Choose 'Already set up'."
+                : "Wrong connection password — the lock rejected it (this is not the keypad PIN)."
+              : "The lock didn't answer. Touch its keypad to wake it, then try again. Nothing was saved.",
+            "err"
+          );
           setBusy(false);
           return;
         }
-        await api.bind(gw, id, password.trim(), tzMinutes);
       }
-      const saved: SavedLock = {
-        gatewayId: gw.id,
-        lockId: id,
-        name: name.trim() || id,
-        actuatorUser: parseInt(user, 10) || 1,
-        actuatorPin: pin.trim(),
-        tzMinutes
-      };
-      locks.upsert(saved);
-      toast(sel?.mode === "import" ? "Lock added." : "Lock bound and saved.", "ok");
-      onBound();
+      setBoundId(id);
+      setStep("user");
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "Failed.", "err");
+      const msg = err instanceof ApiError ? err.message : "Failed.";
+      if (/already has a connection password/i.test(msg)) {
+        setFresh(false);
+        setPassword2("");
+        toast("This lock is already set up — enter its existing connection password.", "err");
+      } else toast(msg, "err");
     } finally {
       setBusy(false);
     }
   }
 
+  function finish(skipUser = false) {
+    if (!skipUser && pin && !/^\d{4,16}$/.test(pin)) {
+      toast("PIN must be 4–16 digits (numbers only).", "err");
+      return;
+    }
+    const saved: SavedLock = {
+      gatewayId: gw.id,
+      lockId: boundId,
+      name: name.trim() || boundId,
+      actuatorUser: parseInt(user, 10) || 1,
+      actuatorPin: skipUser ? "" : pin,
+      tzMinutes: parseInt(tz, 10) || 0
+    };
+    locks.upsert(saved);
+    toast(sel?.mode === "import" ? "Lock added." : "Lock bound and saved.", "ok");
+    onBound();
+  }
+
   // ---- form view ---- //
+  if (sel && step === "user") {
+    return (
+      <Sheet title="Who opens the door?" onClose={onClose}>
+        <div className="meta" style={{ marginBottom: 10 }}>
+          Pick the lock user the app opens the door as, then enter that user's keypad PIN.
+        </div>
+        <div className="card">
+          <UserPicker gw={gw} lockId={boundId} value={parseInt(user, 10) || 0} onPick={(u) => setUser(String(u.id))} />
+        </div>
+        <div className="field">
+          <label>PIN of user #{user}</label>
+          <SecretInput
+            inputMode="numeric"
+            maxLength={16}
+            placeholder="numbers only, e.g. 6 digits"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+          />
+        </div>
+        <button className="btn primary" onClick={() => finish(false)} disabled={!pin}>
+          Finish
+        </button>
+        <button className="btn ghost small" style={{ marginTop: 10 }} onClick={() => finish(true)}>
+          No users yet — add them later in the Users tab
+        </button>
+      </Sheet>
+    );
+  }
+
   if (sel) {
     return (
       <Sheet title={sel.mode === "import" ? "Add this lock" : "Bind lock"} onClose={onClose}>
@@ -121,41 +208,65 @@ export function ScanBindSheet({ gw, onClose, onBound }: { gw: Gateway; onClose: 
           />
         </div>
         <div className="field">
-          <label>Display name</label>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <label>Lock name</label>
+          <input className="input" placeholder="e.g. Main door" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         {sel.mode === "bind" && (
-          <div className="field">
-            <label>Lock BLE password (sent to gateway only)</label>
-            <input
-              className="input"
-              autoCapitalize="none"
-              autoCorrect="off"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+          <>
+            <div className="seg">
+              <button className={fresh ? "on" : ""} onClick={() => setFresh(true)}>
+                New / reset lock
+              </button>
+              <button className={!fresh ? "on" : ""} onClick={() => setFresh(false)}>
+                Already set up
+              </button>
+            </div>
+            <div className="field">
+              <label>{fresh ? "Choose a connection password" : "Lock connection password"}</label>
+              <SecretInput
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="6 digits"
+                value={password}
+                onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
+              />
+            </div>
+            {fresh && (
+              <div className="field">
+                <label>Repeat password</label>
+                <SecretInput
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="6 digits"
+                  value={password2}
+                  onChange={(e) => setPassword2(e.target.value.replace(/\D/g, ""))}
+                />
+              </div>
+            )}
+            <div className="meta" style={{ marginTop: -4, marginBottom: 12 }}>
+              {fresh
+                ? "For a new or factory-reset lock: this app sets the lock's connection password now. Keep it safe — it is needed to add this lock again."
+                : "The 6-digit connection password set when this lock was first added (not the keypad admin PIN)."}
+            </div>
+          </>
         )}
-        <div className="row" style={{ gap: 10 }}>
-          <div className="field grow">
-            <label>Actuator user id</label>
-            <input className="input" inputMode="numeric" value={user} onChange={(e) => setUser(e.target.value)} />
-          </div>
-          <div className="field grow">
-            <label>That user's PIN</label>
-            <input className="input" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} />
-          </div>
-        </div>
         <div className="field">
-          <label>Time zone offset (minutes east of UTC)</label>
-          <input className="input" inputMode="numeric" value={tz} onChange={(e) => setTz(e.target.value)} />
+          <label>Time zone (sets the lock clock)</label>
+          <select className="select" value={tz} onChange={(e) => setTz(e.target.value)}>
+            {!TIME_ZONES.some((z) => String(z.minutes) === tz) && <option value={tz}>Custom (UTC{fmtOffset(+tz)})</option>}
+            {TIME_ZONES.map((z) => (
+              <option key={z.label} value={String(z.minutes)}>
+                {z.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="btn-row">
           <button className="btn ghost" onClick={() => setSel(null)}>
             Back
           </button>
-          <button className="btn primary" onClick={save} disabled={busy}>
-            {busy ? <Spinner /> : sel.mode === "import" ? "Add lock" : "Bind lock"}
+          <button className="btn primary" onClick={connect} disabled={busy}>
+            {busy ? <Spinner /> : sel.mode === "import" ? "Next" : "Connect lock"}
           </button>
         </div>
       </Sheet>
@@ -211,4 +322,17 @@ export function ScanBindSheet({ gw, onClose, onBound }: { gw: Gateway; onClose: 
       </button>
     </Sheet>
   );
+}
+
+/** "Lck1_8F3EE684ECE3" -> "8F3EE684ECE3"; a bare id is returned unchanged. */
+function bareLockId(raw: string): string {
+  const t = raw.trim();
+  const m = /^Lck\d*_(.+)$/i.exec(t);
+  return (m ? m[1] : t).toUpperCase();
+}
+
+function fmtOffset(min: number): string {
+  const sign = min < 0 ? "-" : "+";
+  const a = Math.abs(min || 0);
+  return `${sign}${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}`;
 }

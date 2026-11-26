@@ -3,6 +3,8 @@ import { FiGrid, FiSettings } from "react-icons/fi";
 
 import { App as CapApp } from "@capacitor/app";
 
+import { askNotificationPermission, syncAlertConfig } from "./services/alerts";
+
 import { GatewaySettingsSheet } from "./components/GatewaySettingsSheet";
 import { ToastProvider } from "./components/Toast";
 import { HomeScreen } from "./screens/HomeScreen";
@@ -20,6 +22,13 @@ export function App() {
   const atRoot = view.tab === "home" || view.tab === "settings";
 
   // Android hardware back button.
+  // Background low-battery checks: register once at start (asks for the
+  // notification permission the first time).
+  useEffect(() => {
+    void syncAlertConfig();
+    void askNotificationPermission();
+  }, []);
+
   useEffect(() => {
     const sub = CapApp.addListener("backButton", ({ canGoBack }) => {
       if (gwSettings) setGwSettings(null);

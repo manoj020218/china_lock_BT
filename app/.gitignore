@@ -17,3 +17,6 @@ gateways.local.json
 
 .DS_Store
 Thumbs.db
+
+# Gateway firmware copied in at build time by scripts/bundle-firmware.mjs
+public/firmware/

@@ -13,8 +13,9 @@
 export interface Gateway {
   id: string;
   name: string;
-  host: string;
+  host: string; // last known LAN IP; refreshed automatically by discovery
   token: string;
+  deviceId?: string; // from /api/health; lets the app find the gateway if its IP changes
 }
 
 export interface SavedLock {
@@ -24,6 +25,7 @@ export interface SavedLock {
   actuatorUser: number; // user id used for unlock/lock (usually the admin, 1)
   actuatorPin: string; // that user's PIN
   tzMinutes: number;
+  otpAdmin?: string; // keypad admin PIN used to generate temporary codes (stays on this phone)
 }
 
 const GW_KEY = "jenixlock:gateways";
