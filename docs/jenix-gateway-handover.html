@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jenix Lock Gateway — Handover Note</title>
+<style>
+  :root{
+    --bg:#0b1020; --bg2:#0f1630; --panel:#121a35; --panel2:#0d142b;
+    --stroke:#24305a; --stroke-soft:#1b244a;
+    --text:#e9edff; --muted:#9aa6cf; --faint:#6d7aa6;
+    --accent:#6ea8ff; --accent2:#9b7bff;
+    --get:#35d393; --post:#ffb648; --del:#ff6b6b;
+    --code-bg:#0a0f22; --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--sans);color:var(--text);
+    background:
+      radial-gradient(1100px 620px at 85% -8%,rgba(123,97,255,.22),transparent 60%),
+      radial-gradient(900px 560px at -8% 4%,rgba(78,140,255,.2),transparent 55%),
+      linear-gradient(180deg,#0e1530,#0b1020 60%);
+    background-attachment:fixed;line-height:1.6;}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+
+  .layout{display:grid;grid-template-columns:270px 1fr;max-width:1180px;margin:0 auto;gap:0}
+  /* sidebar */
+  aside{position:sticky;top:0;height:100vh;overflow-y:auto;padding:26px 18px 40px;
+    border-right:1px solid var(--stroke-soft)}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+  .brand .logo{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0f22;font-size:20px}
+  .brand .n{font-weight:750;font-size:16px;letter-spacing:.2px}
+  .brand .s{font-size:11.5px;color:var(--muted)}
+  nav{margin-top:18px;font-size:13.5px}
+  nav .grp{color:var(--faint);text-transform:uppercase;letter-spacing:.09em;font-size:11px;font-weight:700;
+    margin:18px 0 7px}
+  nav a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;margin:1px 0}
+  nav a:hover{color:var(--text);background:rgba(255,255,255,.04);text-decoration:none}
+
+  main{padding:40px 44px 90px;min-width:0}
+  header.hero{margin-bottom:30px}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent);background:rgba(110,168,255,.1);border:1px solid rgba(110,168,255,.3);
+    padding:4px 11px;border-radius:999px;margin-bottom:14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 10px;letter-spacing:-.4px}
+  .lead{font-size:16.5px;color:var(--muted);max-width:720px}
+  h2{font-size:23px;margin:46px 0 14px;padding-top:14px;letter-spacing:-.2px}
+  h3{font-size:16.5px;margin:26px 0 8px}
+  p{color:#cdd5f2}
+  .muted{color:var(--muted)}
+
+  .card{background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01));
+    border:1px solid var(--stroke-soft);border-radius:16px;padding:18px 20px;margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--stroke-soft);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  td code{color:#d7e0ff}
+
+  /* endpoint */
+  .ep{border:1px solid var(--stroke-soft);border-radius:14px;margin:16px 0;overflow:hidden;
+    background:rgba(255,255,255,.015)}
+  .ep>.head{display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:default;
+    border-bottom:1px solid var(--stroke-soft);background:rgba(255,255,255,.02)}
+  .m{font-size:11.5px;font-weight:800;letter-spacing:.05em;padding:4px 9px;border-radius:7px;flex:none}
+  .m.get{color:#07140d;background:var(--get)}
+  .m.post{color:#1c1203;background:var(--post)}
+  .m.del{color:#1c0606;background:var(--del);color:#fff}
+  .path{font-family:var(--mono);font-size:14.5px;color:#e9edff;font-weight:600;word-break:break-all}
+  .auth{margin-left:auto;font-size:11px;color:var(--faint);border:1px solid var(--stroke-soft);
+    padding:3px 8px;border-radius:999px;white-space:nowrap}
+  .auth.open{color:var(--get);border-color:rgba(53,211,147,.4)}
+  .ep .body{padding:14px 16px}
+  .ep .body p{margin:.2em 0 .8em;font-size:14.5px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;
+    margin:14px 0 6px}
+
+  pre{background:var(--code-bg);border:1px solid var(--stroke-soft);border-radius:11px;
+    padding:13px 15px;overflow-x:auto;font-size:13px;margin:6px 0;line-height:1.55}
+  pre code{color:#cfe0ff}
+  .tok-key{color:#8fb7ff}.tok-str{color:#9be8c0}.tok-num{color:#ffcf8f}.tok-bool{color:#c3a6ff}
+  .tok-c{color:#5e6a92}
+  :not(pre)>code{background:rgba(255,255,255,.07);border:1px solid var(--stroke-soft);
+    padding:1px 6px;border-radius:6px;font-size:12.8px;color:#dbe4ff}
+
+  .note{border-left:3px solid var(--accent);background:rgba(110,168,255,.07);
+    padding:11px 15px;border-radius:0 10px 10px 0;margin:14px 0;font-size:14px}
+  .note.warn{border-color:var(--post);background:rgba(255,182,72,.08)}
+  .note.danger{border-color:var(--del);background:rgba(255,107,107,.08)}
+  .note b{color:#fff}
+
+  .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--stroke-soft);border-radius:999px;padding:4px 11px}
+
+  footer{max-width:1180px;margin:0 auto;padding:26px 44px 50px;border-top:1px solid var(--stroke-soft);
+    color:var(--faint);font-size:13px;display:flex;justify-content:space-between;align-items:center;
+    flex-wrap:wrap;gap:16px}
+  footer .fbrand{display:flex;align-items:center;gap:11px}
+  footer .fbrand .logo{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0f22;font-size:18px}
+  footer .fbrand .n{font-weight:750;font-size:14.5px;color:var(--text);letter-spacing:.2px;line-height:1.2}
+  footer .fbrand .s{font-size:11.5px;color:var(--faint)}
+  footer .fcontact{text-align:right;line-height:1.5}
+  footer .fcontact a{font-weight:600}
+  @media(max-width:760px){footer{padding:24px 20px 44px}footer .fcontact{text-align:left}}
+
+  /* diagram */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:14px 0}
+  .flow .node{flex:1;min-width:130px;background:rgba(255,255,255,.03);border:1px solid var(--stroke-soft);
+    border-radius:12px;padding:12px 14px;text-align:center}
+  .flow .node .t{font-weight:700;font-size:14px}
+  .flow .node .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .flow .arr{display:grid;place-items:center;padding:0 8px;color:var(--accent);font-size:20px;min-width:40px}
+  .flow .arr small{display:block;font-size:9.5px;color:var(--faint);letter-spacing:.03em}
+  @media(max-width:760px){
+    .layout{grid-template-columns:1fr}
+    aside{position:static;height:auto;border-right:none;border-bottom:1px solid var(--stroke-soft)}
+    nav{columns:2}
+    main{padding:28px 20px 70px}
+    .flow .arr{transform:rotate(90deg)}
+  }
+</style>
+<style>
+  main{max-width:900px}
+  .check{list-style:none;padding:0}
+  .check li{padding:6px 0 6px 28px;position:relative;font-size:14.5px}
+  .check li::before{content:"\2610";position:absolute;left:0;top:4px;font-size:17px;color:var(--accent)}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:10px 0}
+  ol.steps>li{counter-increment:s;position:relative;padding:7px 0 7px 40px;font-size:14.5px}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:5px;width:26px;height:26px;border-radius:50%;
+    background:linear-gradient(135deg,#6ea8ff,#9b7bff);color:#0a0f22;font-weight:800;display:grid;place-items:center;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand">
+      <div class="logo">&#128274;</div>
+      <div>
+        <div class="n">Jenix Lock Gateway</div>
+        <div class="s">Handover Note</div>
+      </div>
+    </div>
+    <nav>
+      <div class="grp">Handover</div>
+      <a href="#box">1 · What you receive</a>
+      <a href="#setup">2 · First-time setup</a>
+      <a href="#locks">3 · Add a lock</a>
+      <a href="#rules">4 · Rules that matter</a>
+      <a href="#net">5 · Network &amp; security</a>
+      <a href="#ops">6 · Updates, reset &amp; light</a>
+      <a href="#tested">7 · Tested &amp; next phase</a>
+    </nav>
+  </aside>
+  <main>
+
+<header class="hero">
+  <span class="tag">Handover note &middot; gateway firmware 1.2.14 &middot; 26 November 2026</span>
+  <h1>Jenix Lock Gateway — Handover</h1>
+  <p class="lead">Everything you need to take over the Jenix Lock Gateway and build your own software on its HTTP API.
+  The full endpoint reference is in the <b>API &amp; Integration Guide</b>; this note covers what you receive, the
+  first-time setup and the rules that matter most.</p>
+</header>
+
+<div class="pillrow">
+  <span class="pill">Firmware 1.2.14</span>
+  <span class="pill">HTTP/JSON over Wi-Fi (LAN)</span>
+  <span class="pill">Bearer token</span>
+  <span class="pill">Several locks per gateway</span>
+</div>
+
+<h2 id="box">1 · What you receive</h2>
+<ul class="check">
+  <li>Jenix Lock Gateway (ESP32-S3), firmware <b>1.2.14</b>, <b>factory-fresh</b> (LED blinking purple on power-up)</li>
+  <li>5 V / 2 A USB power adapter — use this or an equivalent; weak chargers cause restarts</li>
+  <li><code>jenix-gateway-api.html</code> — API &amp; Integration Guide (all endpoints, examples, errors)</li>
+  <li><code>jenix-lock-user-guide.html</code> — end-user guide for the Jenix Lock app</li>
+  <li>Optional: Jenix Lock app (Android test build) for quick setup and testing</li>
+</ul>
+
+<h2 id="setup">2 · First-time setup (choose one)</h2>
+<h3>A · With the Jenix Lock app</h3>
+<p>Tap <b>+</b> &rarr; <b>Set up new gateway</b> and follow the steps. The app connects the gateway to your Wi-Fi and
+stores its API token. Read the token later from the gateway's USB console (<code>TOKEN</code>) if your software needs it.</p>
+<h3>B · From your own software (no app)</h3>
+<ol class="steps">
+  <li>Power the gateway; join its open Wi-Fi <b>JenixLock-XXXX</b>. The gateway is at <code>192.168.4.1</code>.</li>
+  <li><code>GET http://192.168.4.1/api/health</code> &rarr; <code>"setup": true</code> and the <code>device_id</code>.</li>
+  <li><code>POST http://192.168.4.1/api/provision</code> with <code>{"ssid":"&lt;wifi&gt;","pass":"&lt;password&gt;"}</code>.
+  The reply contains <b>your API token</b> — store it securely.</li>
+  <li>Poll <code>GET /api/provision/status</code> until <code>"state":"connected"</code>; note the new <code>ip</code>.</li>
+  <li><code>POST /api/provision/finish</code> (with the token) closes the setup network. Rejoin your Wi-Fi and use
+  <code>http://&lt;ip&gt;</code> from now on.</li>
+</ol>
+<div class="note">If the gateway's IP changes later, find it again by probing <code>GET /api/health</code> on the subnet and
+matching <code>device_id</code>, or via mDNS <code>jenixlock-xxxx.local</code>.</div>
+
+<h2 id="locks">3 · Add a lock</h2>
+<ol class="steps">
+  <li>Wake the lock (touch its keypad). <code>GET /api/scan</code> lists nearby locks as <code>Lck1_&lt;ID&gt;</code>.
+  Use the <b>bare ID</b> after the underscore everywhere.</li>
+  <li>Optional: <code>GET /api/probe?lock=&lt;ID&gt;</code> checks the model; <code>"supported": true</code> is required.</li>
+  <li><code>POST /api/bind</code>:
+    <ul>
+      <li><b>New or factory-reset lock:</b> <code>{"lock_id":"&lt;ID&gt;","password":"&lt;6 digits&gt;","tz_minutes":330,"set_password":true}</code>
+      — the gateway sets this connection password on the lock.</li>
+      <li><b>Lock already set up:</b> the same without <code>set_password</code>, using its existing 6-digit connection password.</li>
+    </ul></li>
+  <li>Verify: <code>GET /api/version?lock=&lt;ID&gt;</code>. Error <code>login error 19/33</code> = wrong password
+  (unbind and retry); <code>-1</code> = lock asleep (wake it, retry).</li>
+</ol>
+
+<h2 id="rules">4 · Rules that matter</h2>
+<table>
+  <tr><th>Topic</th><th>Rule</th></tr>
+  <tr><td>Lock ID</td><td>Always the bare ID (<code>8F3EE684ECE3</code>), never <code>Lck1_…</code> — it is part of the login key.</td></tr>
+  <tr><td>Connection password</td><td>6 digits, used only by the gateway to log in. <b>Not</b> a keypad PIN.</td></tr>
+  <tr><td>Unlock / lock</td><td>Send a lock user's ID + that user's keypad PIN. <code>502 "unlock rejected"</code> = wrong user/PIN.</td></tr>
+  <tr><td>PINs</td><td>Must be unique per lock. A refused PIN returns <code>409</code> — show users only "choose a
+  different PIN", never the reason (it would reveal another user's PIN).</td></tr>
+  <tr><td>Temporary door codes</td><td>Generated offline from the <b>keypad admin PIN</b> and the lock's local time
+  (its time zone). Algorithm and test vector are in the API guide.</td></tr>
+  <tr><td>Auto close</td><td>The lock's own delay needs its door magnet; for API/app unlocks use
+  <code>/api/settings/app-autoclose</code> (gateway re-locks, no magnet needed).</td></tr>
+  <tr><td>Battery</td><td>The gateway measures every lock every 6 h — read <code>GET /api/alerts</code> (<code>low</code> below 25 %).</td></tr>
+  <tr><td>Records</td><td>Merge the lock's log (PIN, fingerprint, card) with the gateway's log (app, cloud, auto close).</td></tr>
+</table>
+
+<h2 id="net">5 · Network &amp; security</h2>
+<ul>
+  <li>Plain HTTP on the local network; every endpoint except <code>/api/health</code> needs the bearer token. Keep the
+  token server-side; reset the gateway to rotate it.</li>
+  <li><b>Wi-Fi repeaters with the same network name</b> may block traffic between their clients and the main router's
+  clients. The gateway joins the strongest access point; <code>/api/health</code> shows which one
+  (<code>wifi_bssid</code>). Prefer one router or a proper mesh system for the gateway's Wi-Fi.</li>
+  <li>Place the gateway within about 5–8 m of the locks. <code>GET /api/signal?lock=…</code> shows the live signal.</li>
+</ul>
+
+<h2 id="ops">6 · Updates, reset &amp; light</h2>
+<ul>
+  <li><b>Firmware updates:</b> from the Jenix Lock app (Gateway settings &rarr; Update) or
+  <code>POST /api/ota/upload</code>. Wi-Fi, token and locks are kept; a bad file is rejected.
+  <code>/api/health</code> reports <code>fw_version</code>.</li>
+  <li><b>Factory reset (gateway only):</b> press RESET 10&times;, about once per second (white blink per press, amber
+  from the 5th, then purple). Clears Wi-Fi, token and bindings — never the locks' users.</li>
+  <li><b>Light:</b> purple blink = setup · blue = online · red blink = Wi-Fi lost · 3 red flashes = a command failed ·
+  2 green flashes = unlocked · amber flash = locked.</li>
+</ul>
+
+<h2 id="tested">7 · Tested &amp; not yet included</h2>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0">Validated on hardware</h3>
+    <p class="muted" style="font-size:14px">Locks BK50D-V2.5 and BK21F-V2.6.1 · Wi-Fi setup without IP typing ·
+    new-lock password setup · unlock/lock · users, PIN change, fingerprint and card enrollment · door codes ·
+    auto close after app unlock · battery read · records with names · firmware update from the app.</p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Next phase</h3>
+    <p class="muted" style="font-size:14px">Cloud connection (remote access and push alerts through your server — the
+    gateway's MQTT client exists, the server side does not) · signed Play Store release of the app · locks with
+    newer login protocols (<code>command_version</code> &gt; 0).</p>
+  </div>
+</div>
+
+  </main>
+</div>
+<footer>
+  <div class="fbrand">
+    <div class="logo">&#128274;</div>
+    <div>
+      <div class="n">Jenix India</div>
+      <div class="s">Jenix Lock Gateway — Handover Note</div>
+    </div>
+  </div>
+  <div class="fcontact">
+    <div>For integration support, contact us:</div>
+    <div><a href="mailto:jenixindia@gmail.com">jenixindia@gmail.com</a></div>
+    <div class="s" style="color:var(--faint);font-size:11.5px">&copy; Jenix India. All rights reserved.</div>
+  </div>
+</footer>
+</body>
+</html>
